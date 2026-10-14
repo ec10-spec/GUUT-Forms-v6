@@ -1,0 +1,74 @@
+[
+  {
+    "at": "2026-10-14T03:02:05.199Z",
+    "passed": 63,
+    "failed": 0,
+    "failures": [],
+    "node": "v22.22.0",
+    "commit": null
+  },
+  {
+    "at": "2026-10-14T05:56:28.001Z",
+    "passed": 66,
+    "failed": 0,
+    "failures": [],
+    "node": "v22.22.0",
+    "commit": null
+  },
+  {
+    "at": "2026-10-14T06:43:17.474Z",
+    "passed": 65,
+    "failed": 1,
+    "failures": [
+      "individual cannot share with business user"
+    ],
+    "node": "v22.22.0",
+    "commit": null
+  },
+  {
+    "at": "2026-10-14T06:43:56.700Z",
+    "passed": 94,
+    "failed": 2,
+    "failures": [
+      "individual shares form with open team",
+      "team member sees the form"
+    ],
+    "node": "v22.22.0",
+    "commit": null
+  },
+  {
+    "at": "2026-10-14T06:44:09.481Z",
+    "passed": 94,
+    "failed": 2,
+    "failures": [
+      "individual shares form with open team",
+      "team member sees the form"
+    ],
+    "node": "v22.22.0",
+    "commit": null
+  },
+  {
+    "at": "2026-10-14T06:44:21.737Z",
+    "passed": 96,
+    "failed": 0,
+    "failures": [],
+    "node": "v22.22.0",
+    "commit": null
+  },
+  {
+    "at": "2026-10-14T07:01:11.433Z",
+    "passed": 98,
+    "failed": 0,
+    "failures": [],
+    "node": "v22.22.0",
+    "commit": null
+  },
+  {
+    "at": "2026-10-14T07:15:45.630Z",
+    "passed": 99,
+    "failed": 0,
+    "failures": [],
+    "node": "v22.22.0",
+    "commit": null
+  }
+]

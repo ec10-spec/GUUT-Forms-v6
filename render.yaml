@@ -1,0 +1,47 @@
+# Render Blueprint: New + > Blueprint, pick this repo. Every push to the
+# branch auto-deploys. Secrets marked sync:false are asked for once in the dashboard.
+services:
+  - type: web
+    name: guut-forms
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20
+      - key: MONGO_URI
+        sync: false
+      - key: SUPERADMIN_EMAIL
+        sync: false
+      - key: SUPERADMIN_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: SIGNUPS_ENABLED
+        value: "true"
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: "false"
+      - key: FREE_AI_CREDIT_USD
+        value: "5"
+      - key: PLATFORM_AI_KEY
+        sync: false
+      - key: ENFORCE_BILLING
+        value: "false"
+      # Email notifications (optional). Leave SMTP_HOST empty to keep emails off.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false

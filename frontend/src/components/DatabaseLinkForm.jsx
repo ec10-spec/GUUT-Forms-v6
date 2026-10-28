@@ -44,7 +44,7 @@ export default function DatabaseLinkForm({ onUserUpdated }) {
     <div className="settings-panel">
       <h2>Your database</h2>
       <p className="settings-hint">
-        Optional. Until you connect one, your forms and responses are <strong>hosted by us</strong>. Connect <strong>your own MongoDB database</strong>
+        Optional. Until you connect one, your forms and responses are <strong>hosted by us</strong>. Connect <strong>your own MongoDB database</strong>{" "}
         to keep everything your company collects on your own infrastructure.
       </p>
 
@@ -62,9 +62,9 @@ export default function DatabaseLinkForm({ onUserUpdated }) {
         </label>
         <label className="check-row">
           <input type="checkbox" checked={migrate} onChange={(e) => setMigrate(e.target.checked)} />
-          {linked
+          <span>{linked
             ? "Copy my existing forms and responses into the new database (the old ones are left untouched)"
-            : "Move my existing forms and responses into this database (removed from our hosted storage once the copy is verified)"}
+            : "Move my existing forms and responses into this database (removed from our hosted storage once the copy is verified)"}</span>
         </label>
         {msg && <p className={msg.ok ? "key-saved-msg" : "error"}>{msg.text}</p>}
         <div className="api-key-actions">

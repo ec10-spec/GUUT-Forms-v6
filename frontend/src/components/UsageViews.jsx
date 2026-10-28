@@ -91,6 +91,7 @@ function StorageUsage() {
   useEffect(() => { api.usageStorage().then(setD).catch((e) => setError(e.message)); }, []);
   if (error) return <div className="settings-panel"><h2>Storage</h2><p className="error">{error}</p></div>;
   if (!d) return null;
+  const measured = d.measuredAt ? new Date(d.measuredAt).toLocaleString() : null;
   const pct = d.limitBytes ? Math.min(100, Math.round((d.bytes / d.limitBytes) * 100)) : null;
   return (
     <div className="settings-panel">
@@ -109,6 +110,7 @@ function StorageUsage() {
       ) : (
         <p className="settings-hint small">{fmtBytes(d.bytes)} used. {d.mode === "custom" ? "" : "There is no storage limit on your account right now."}</p>
       )}
+      {measured && <p className="settings-hint small">Last updated {measured}. Includes uploaded files and header images.</p>}
       <div className="stat-row">
         <div className="stat"><strong>{d.forms}</strong><span>Forms</span></div>
         <div className="stat"><strong>{fmtTokens(d.responses)}</strong><span>Responses</span></div>
@@ -139,18 +141,30 @@ function AiUsage() {
   return (
     <div className="settings-panel">
       <h2>AI usage</h2>
-      <p className="settings-hint">Tokens used by your AI features, through your own provider key. Costs are estimates; your provider's dashboard is the source of truth.</p>
-      <div className="budget-meter" title={`${b.used} of ${b.limit} tokens used today`}>
-        <div className="budget-meter-fill" style={{ width: `${pct}%` }} />
-      </div>
-      <p className="settings-hint small">Today: {fmtTokens(b.used)} of {fmtTokens(b.limit)} tokens ({fmtTokens(b.remaining)} left).</p>
+      <p className="settings-hint">
+        Tokens used by your AI features{b.source === "own_key" ? ", through your own provider key" : b.source === "platform_credit" ? ", from your free AI credit" : ""}.
+        Costs are estimates at each model's list price, with input and output priced separately; your provider's dashboard is the source of truth.
+      </p>
+      {b.aiReady === false ? (
+        <div className="notice-box">
+          <strong>Add your AI key to use AI.</strong> AI form generation and the analysis assistant need your own Claude or ChatGPT key.{" "}
+          <a className="link-btn" href="#/settings/ai" onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent("guut:settings-tab", { detail: "ai" })); }}>Go to Settings, AI</a>
+        </div>
+      ) : (
+        <>
+          <div className="budget-meter" title={`${b.used} of ${b.limit} tokens used today`}>
+            <div className="budget-meter-fill" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="settings-hint small">Today: {fmtTokens(b.used)} of {fmtTokens(b.limit)} tokens ({fmtTokens(b.remaining)} left). The daily limit resets at {new Date(b.resetsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} your time.</p>
+        </>
+      )}
       <DaysSelect days={days} onChange={setDays} />
       <UsageTotals data={data} />
       {data.byEndpoint.length > 0 && (
         <div className="table-scroll">
           <table>
-            <thead><tr><th>Feature</th><th>Calls</th><th>Tokens</th></tr></thead>
-            <tbody>{data.byEndpoint.map((e) => <tr key={e.endpoint}><td>{FEATURE[e.endpoint] || e.endpoint}</td><td>{e.calls}</td><td>{fmtTokens(e.tokens)}</td></tr>)}</tbody>
+            <thead><tr><th>Feature</th><th>Calls</th><th>Input tokens</th><th>Output tokens</th><th>Est. cost</th></tr></thead>
+            <tbody>{data.byEndpoint.map((e) => <tr key={e.endpoint}><td>{FEATURE[e.endpoint] || e.endpoint}</td><td>{e.calls}</td><td>{fmtTokens(e.inputTokens)}</td><td>{fmtTokens(e.outputTokens)}</td><td>${e.estimatedCostUsd}</td></tr>)}</tbody>
           </table>
         </div>
       )}

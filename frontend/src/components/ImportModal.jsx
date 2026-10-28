@@ -98,7 +98,7 @@ export default function ImportModal({ form, onClose, onImported }) {
               <div className="map-row">
                 <div><strong>Submitted date</strong><span>Optional. Keeps the original date</span></div>
                 <select value={ts} onChange={(e) => { setTs(e.target.value); setCheck(null); }} aria-label="Date column">
-                  <option value="">Use today's date</option>
+                  <option value="">Use the import time</option>
                   {info.headers.map((h) => <option key={h} value={h}>{h}</option>)}
                 </select>
               </div>
@@ -106,7 +106,15 @@ export default function ImportModal({ form, onClose, onImported }) {
 
             {check && (
               <div className="import-check">
-                <p><strong>{check.importable}</strong> of {check.total} rows can be imported{check.skipped ? `, ${check.skipped} skipped` : ""}.</p>
+                <p><strong>{check.importable}</strong> of {check.total} rows can be imported.</p>
+                {(check.skippedMissing > 0 || check.skippedEmpty > 0 || check.badTimestamps > 0) && (
+                  <ul className="import-counts">
+                    {check.skippedMissing > 0 && <li><strong>{check.skippedMissing}</strong> row{check.skippedMissing === 1 ? "" : "s"} skipped: a required answer is missing or invalid.</li>}
+                    {check.skippedEmpty > 0 && <li><strong>{check.skippedEmpty}</strong> empty row{check.skippedEmpty === 1 ? "" : "s"} skipped.</li>}
+                    {check.badTimestamps > 0 && <li><strong>{check.badTimestamps}</strong> row{check.badTimestamps === 1 ? " has a date" : "s have dates"} that couldn't be read, so the import time is used.</li>}
+                  </ul>
+                )}
+                <p className="settings-hint small">Answers that don't fit a question (for example a rating of 9, or a choice that isn't an option) are left blank.</p>
                 {check.issues?.length > 0 && (
                   <details><summary>{check.issueCount} note{check.issueCount === 1 ? "" : "s"}</summary><ul>{check.issues.map((i, k) => <li key={k}>{`Row ${i.row}, ${i.field}: ${i.message}`}</li>)}</ul></details>
                 )}
@@ -122,7 +130,7 @@ export default function ImportModal({ form, onClose, onImported }) {
 
         {step === "done" && result && (
           <>
-            <p><strong>{result.imported}</strong> responses imported{result.skipped ? `, ${result.skipped} skipped` : ""}.</p>
+            <p><strong>{result.imported}</strong> responses imported{result.skipped ? `, ${result.skipped} row${result.skipped === 1 ? "" : "s"} skipped` : ""}.</p>
             <button className="primary" onClick={onClose}>Done</button>
           </>
         )}

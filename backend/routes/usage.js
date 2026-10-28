@@ -17,7 +17,7 @@ router.use(requireAuth);
 // GET /api/usage/me?days=30
 router.get("/me", async (req, res) => {
   const days = Number(req.query.days) || 30;
-  res.json({ budget: await getBudget(req.userId), ...(await usageDetail(req.userId, days)) });
+  res.json({ budget: await getBudget(req.user), ...(await usageDetail(req.userId, days, req.query.tz)) });
 });
 
 // GET /api/usage/storage: stored form + response bytes. Individuals and company admins see the whole
@@ -38,7 +38,8 @@ router.get("/storage", async (req, res) => {
     limitBytes: storageLimitBytes(company),
     mode: company.customUriEncrypted ? "custom" : "hosted",
     forms: rows.length, responses: rows.reduce((a, r) => a + r.responses, 0),
-    topForms: rows.slice(0, 10), measuredAt: company.storage.verifiedAt,
+    // When the total last changed (updated on every write); recountedAt is the last full recount.
+    topForms: rows.slice(0, 10), measuredAt: company.storage.updatedAt || company.storage.verifiedAt, recountedAt: company.storage.verifiedAt,
   });
 });
 
@@ -46,7 +47,7 @@ router.get("/storage", async (req, res) => {
 router.get("/team", requireCompanyAdmin, async (req, res) => {
   const days = Number(req.query.days) || 30;
   const users = await User.find({ companyId: req.user.companyId }).select("name email role active").limit(500);
-  const usage = new Map((await usageByUser({ userIds: users.map((u) => String(u._id)), days })).map((r) => [r.userId, r]));
+  const usage = new Map((await usageByUser({ userIds: users.map((u) => String(u._id)), days, tz: req.query.tz })).map((r) => [r.userId, r]));
   const rows = users.map((u) => {
     const r = usage.get(String(u._id));
     return { userId: String(u._id), name: u.name || "", email: u.email, role: u.role, active: u.active, calls: r?.calls || 0, tokens: r?.tokens || 0, today: r?.today || 0, lastAt: r?.lastAt || null, estimatedCostUsd: r?.estimatedCostUsd || 0 };

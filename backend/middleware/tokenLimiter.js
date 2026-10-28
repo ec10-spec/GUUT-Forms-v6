@@ -1,4 +1,5 @@
 import TokenUsage from "../models/TokenUsage.js";
+import { costOf } from "../utils/pricing.js";
 
 const DAILY_LIMIT = () => Number(process.env.DAILY_TOKEN_LIMIT || 100000);
 // Hard ceiling on any single call's max_tokens, whatever the UI slider asks for.
@@ -42,7 +43,6 @@ export const analysisTokenLimiter = createTokenLimiter({ ceiling: ANALYSIS_CEILI
 // Free AI credit: new accounts can use the platform's AI key until this much (estimated) spend is used.
 // A person's own key always takes priority and never uses the credit.
 export const freeCreditUsd = () => Number(process.env.FREE_AI_CREDIT_USD ?? 5);
-export const costPer1k = () => Number(process.env.COST_PER_1K_TOKENS_USD ?? 0.006);
 export const platformKeyConfigured = () => !!process.env.PLATFORM_AI_KEY;
 
 export async function creditUsed(userId) {
@@ -58,12 +58,31 @@ export async function creditOf(userId) {
 export async function recordTokenUsage({ userId, provider, model, promptTokens, completionTokens, endpoint, viaPlatform = false }) {
   await TokenUsage.create({
     userId: String(userId), provider, model, endpoint, viaPlatform,
-    costUsd: viaPlatform ? ((promptTokens + completionTokens) / 1000) * costPer1k() : 0,
+    costUsd: viaPlatform ? costOf(model, promptTokens, completionTokens) : 0,
     promptTokens, completionTokens, totalTokens: promptTokens + completionTokens,
   });
 }
 
-export async function getBudget(userId) {
+/** The person has their own key saved for the provider they picked (mirrors resolveAiConfig). */
+export function hasOwnKey(user) {
+  const provider = user?.ai?.provider === "openai" ? "openai" : "anthropic";
+  return provider === "openai" ? !!user?.ai?.openaiKeyEncrypted : !!(user?.ai?.anthropicKeyEncrypted || user?.settings?.aiApiKeyEncrypted);
+}
+
+/**
+ * Today's AI budget. Pass the user document. aiReady is false when the person has neither their own key
+ * nor platform credit left, so the UI can ask for a key instead of showing a token count.
+ */
+export async function getBudget(user) {
+  const userId = String(user?._id ?? user);
   const used = await usedToday(userId);
-  return { credit: await creditOf(userId), used, limit: DAILY_LIMIT(), remaining: Math.max(0, DAILY_LIMIT() - used), maxPerCallCeiling: CEILING(), maxPerAnalysisCeiling: ANALYSIS_CEILING() };
+  const credit = await creditOf(userId);
+  const ownKey = typeof user === "object" ? hasOwnKey(user) : false;
+  const aiReady = ownKey || (credit.available && credit.remainingUsd > 0);
+  const tomorrow = new Date(); tomorrow.setUTCHours(24, 0, 0, 0);
+  return {
+    aiReady, hasOwnKey: ownKey, source: ownKey ? "own_key" : aiReady ? "platform_credit" : "none",
+    credit, used, limit: DAILY_LIMIT(), remaining: Math.max(0, DAILY_LIMIT() - used), resetsAt: tomorrow.toISOString(),
+    maxPerCallCeiling: CEILING(), maxPerAnalysisCeiling: ANALYSIS_CEILING(),
+  };
 }

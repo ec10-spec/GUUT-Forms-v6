@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
 import { decrypt } from "../utils/crypto.js";
-import { FormSchema, SubmissionSchema } from "../models/tenantSchemas.js";
+import { FormSchema, SubmissionSchema, AnalysisChatSchema } from "../models/tenantSchemas.js";
 import { isProd } from "./env.js";
 import { httpError } from "../utils/http.js";
 
@@ -16,8 +16,37 @@ export async function connectPlatformDB() {
     uri = (await MongoMemoryServer.create()).getUri();
     console.log("No MONGO_URI set: using a throwaway in-memory MongoDB (data resets on restart).");
   }
-  await mongoose.connect(uri, { serverSelectionTimeoutMS: 15000 });
-  console.log(`Platform DB connected (${mongoose.connection.host}/${mongoose.connection.name})`);
+  const dbName = await choosePlatformDbName(uri);
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 15000, ...(dbName ? { dbName } : {}) });
+  const name = mongoose.connection.name;
+  console.log(`Platform DB connected (${mongoose.connection.host}/${name})`);
+  if (name === "test") {
+    console.warn("WARNING: the platform database is named \"test\", which is easy to drop by mistake. Copy it with `npm run migrate:platform-db` and set PLATFORM_DB_NAME=guut_platform (see SETUP.md).");
+  }
+}
+
+const DEFAULT_PLATFORM_DB = "guut_platform";
+/**
+ * Which database holds accounts, companies and logs. PLATFORM_DB_NAME wins; otherwise the name in
+ * MONGO_URI; otherwise "guut_platform". A URI with no name used to fall back to MongoDB's default "test",
+ * so if "guut_platform" is still empty while "test" has accounts, keep using "test" until the data has
+ * been copied over (scripts/migrate-platform-db.mjs), rather than starting on an empty database.
+ */
+export async function choosePlatformDbName(uri) {
+  if (process.env.PLATFORM_DB_NAME) return process.env.PLATFORM_DB_NAME;
+  if (parseMongoUri(uri)) return null; // the URI names its database
+  const probe = mongoose.createConnection(uri, { serverSelectionTimeoutMS: 15000 });
+  try {
+    await probe.asPromise();
+    const hasUsers = async (name) => (await probe.useDb(name, { useCache: false }).db.collection("users").estimatedDocumentCount().catch(() => 0)) > 0;
+    if (!(await hasUsers(DEFAULT_PLATFORM_DB)) && (await hasUsers("test"))) {
+      console.warn(`WARNING: accounts are still in the "test" database. Using it for now. Run \`npm run migrate:platform-db\` to move them to "${DEFAULT_PLATFORM_DB}".`);
+      return "test";
+    }
+    return DEFAULT_PLATFORM_DB;
+  } finally {
+    await probe.close().catch(() => {});
+  }
 }
 
 export function platformStatus() {
@@ -30,6 +59,7 @@ function modelsFor(conn) {
   return {
     Form: conn.models.Form || conn.model("Form", FormSchema),
     Submission: conn.models.Submission || conn.model("Submission", SubmissionSchema),
+    AnalysisChat: conn.models.AnalysisChat || conn.model("AnalysisChat", AnalysisChatSchema),
   };
 }
 

@@ -16,5 +16,7 @@ const TokenUsageSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+// The daily budget and usage pages read one person's rows over a time range.
+TokenUsageSchema.index({ userId: 1, createdAt: -1 });
 
 export default mongoose.model("TokenUsage", TokenUsageSchema);

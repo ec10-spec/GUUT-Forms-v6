@@ -95,7 +95,7 @@ export default function Home({ user, onOpenDraft, onOpenForm }) {
       setSuggested({ ...draft, generationPrompt: prompt });
     } catch (err) {
       setGenError(err.message);
-      setGenNeedsKey(err.code === "NO_API_KEY" || err.code === "BAD_API_KEY");
+      setGenNeedsKey(["NO_API_KEY", "BAD_API_KEY", "CREDIT_EXHAUSTED"].includes(err.code));
     } finally {
       setGenerating(false);
     }
@@ -132,13 +132,14 @@ export default function Home({ user, onOpenDraft, onOpenForm }) {
 
         <div className="hero-prompt-row">
           <textarea
-            className="hero-textarea"
+            className="hero-textarea" aria-label="Describe the form you need"
             placeholder="e.g. A price quote form with product selection and a summary"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={2}
           />
-          <button className="primary hero-generate-btn" disabled={generating} onClick={handleGenerate}>
+          <button className="primary hero-generate-btn" disabled={generating || !prompt.trim() || budget?.aiReady === false} onClick={handleGenerate}
+            title={budget?.aiReady === false ? "Add your AI key in Settings to generate forms" : !prompt.trim() ? "Describe the form you need first" : ""}>
             {generating ? "Generating..." : "Generate"}
           </button>
         </div>
@@ -147,8 +148,18 @@ export default function Home({ user, onOpenDraft, onOpenForm }) {
           <button className="link-btn" onClick={() => setShowAdvanced((s) => !s)}>
             {showAdvanced ? "Hide options" : "Attach a file, set a token limit"}
           </button>
-          {budget && <span className="budget-display">{budget.remaining.toLocaleString()} / {budget.limit.toLocaleString()} tokens left today</span>}
+          {budget?.aiReady === false ? (
+            <span className="budget-display">
+              Add your AI key to use AI.{" "}
+              <button className="link-btn" onClick={() => { window.location.hash = "/settings/ai"; }}>Open Settings</button>
+            </span>
+          ) : budget && (
+            <span className="budget-display">
+              {budget.remaining.toLocaleString()} / {budget.limit.toLocaleString()} tokens left today{budget.source === "own_key" ? ", through your own provider key" : budget.source === "platform_credit" ? `, free AI credit $${budget.credit.remainingUsd.toFixed(2)} left` : ""}
+            </span>
+          )}
         </div>
+        {!prompt.trim() && budget?.aiReady !== false && <p className="hero-hint">Describe the form you need, then press Generate. Or start from a template below.</p>}
 
         {showAdvanced && (
           <div className="ai-controls-row">
@@ -169,10 +180,10 @@ export default function Home({ user, onOpenDraft, onOpenForm }) {
           </div>
         )}
         {genError && (
-          <p className="error">
+          <div className="hero-error" role="alert">
             {genError}{" "}
-            {genNeedsKey && <button className="link-btn" onClick={() => { window.location.hash = "/settings"; }}>Open Settings</button>}
-          </p>
+            {genNeedsKey && <button className="link-btn" onClick={() => { window.location.hash = "/settings/ai"; }}>Open Settings</button>}
+          </div>
         )}
       </section>
 

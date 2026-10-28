@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api.js";
 import Icon from "./Icon.jsx";
 
@@ -12,10 +12,11 @@ export default function CommandPalette({ open, onClose, pages, onGo }) {
   const [i, setI] = useState(0);
   const inputRef = useRef(null);
 
+  // Focus before the browser paints, so keys typed straight after Ctrl K land in the box.
+  useLayoutEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
   useEffect(() => {
     if (!open) return;
     setQ(""); setI(0);
-    setTimeout(() => inputRef.current?.focus(), 10);
     api.listForms("").then(setForms).catch(() => setForms([]));
   }, [open]);
 
@@ -36,7 +37,7 @@ export default function CommandPalette({ open, onClose, pages, onGo }) {
         <div className="cmdk-input">
           <Icon name="search" />
           <input
-            ref={inputRef} value={q} placeholder="Go to a page or form"
+            ref={inputRef} autoFocus value={q} placeholder="Go to a page or form" aria-label="Go to a page or form"
             onChange={(e) => { setQ(e.target.value); setI(0); }}
             onKeyDown={(e) => {
               if (e.key === "Escape") onClose();

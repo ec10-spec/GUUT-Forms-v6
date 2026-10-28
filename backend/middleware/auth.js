@@ -9,7 +9,7 @@ import { assertBillingOk } from "../utils/plans.js";
 const secret = () => process.env.JWT_SECRET || "guut-forms-dev-secret-change-me";
 
 export function signToken(user) {
-  return jwt.sign({ sub: String(user._id) }, secret(), { expiresIn: process.env.JWT_EXPIRES_IN || "7d" });
+  return jwt.sign({ sub: String(user._id), v: user.tokenVersion || 0 }, secret(), { expiresIn: process.env.JWT_EXPIRES_IN || "7d" });
 }
 
 // Runs on every /api request. Resolves the Bearer token (if any) to the user
@@ -28,7 +28,8 @@ export async function attachUser(req, _res, next) {
     return next();
   }
   const user = await User.findById(payload.sub);
-  if (user && user.active) {
+  // A token issued before the last password change is no longer valid.
+  if (user && user.active && (payload.v || 0) === (user.tokenVersion || 0)) {
     req.user = user;
     req.userId = String(user._id);
     // Teams this person is in right now (used by utils/access.js), so membership changes apply at once.

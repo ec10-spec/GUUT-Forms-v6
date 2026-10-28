@@ -17,15 +17,24 @@ const FieldSchema = new mongoose.Schema(
     required: { type: Boolean, default: false },
     options: [{ type: String }],
     order: { type: Number, required: true },
+    // Conditional logic: show this field only when another field's answer meets a condition.
+    // op: eq (equals), in (is one of), lte / gte (for rating, number and date sources).
+    // `equals` is the single value used by older forms; `values` holds one or more values.
     showIf: {
       fieldId: { type: String, default: null },
+      op: { type: String, enum: ["eq", "in", "lte", "gte"], default: "eq" },
       equals: { type: String, default: null },
+      values: { type: [String], default: undefined },
     },
+    // File upload questions: allowed kinds (see utils/uploads.js) and a per-question size limit.
+    accept: { type: [String], default: undefined },
+    maxSizeMb: { type: Number, default: undefined, min: 1, max: 10 },
   },
   { _id: false }
 );
 
 const OPTION_TYPES = new Set(["checkbox", "select"]);
+export const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 FieldSchema.path("label").validate((v) => v.trim().length > 0, "Every field needs a label.");
 
 export const FormSchema = new mongoose.Schema(
@@ -47,9 +56,9 @@ export const FormSchema = new mongoose.Schema(
     isPublic: { type: Boolean, default: false },
     sizeBytes: { type: Number, default: 0 }, // approximate stored size, kept for storage tracking
     theme: {
-      primaryColor: { type: String, default: "#001549" },
-      backgroundColor: { type: String, default: "#f6f7fb" },
-      headerImage: { type: String, default: null },
+      primaryColor: { type: String, default: "#001549", match: [HEX, "Colours must be hex values like #001549."] },
+      backgroundColor: { type: String, default: "#f6f7fb", match: [HEX, "Colours must be hex values like #f6f7fb."] },
+      headerImage: { type: String, default: null }, // URL of an uploaded asset (older forms may hold a data: URL)
     },
   },
   { timestamps: true }
@@ -65,3 +74,31 @@ export const SubmissionSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+// Responses are always read per form, newest first.
+SubmissionSchema.index({ formId: 1, createdAt: -1 });
+
+// Saved AI assistant conversations, one per chat, per form and person.
+export const AnalysisChatSchema = new mongoose.Schema(
+  {
+    formId: { type: mongoose.Schema.Types.ObjectId, required: true },
+    userId: { type: String, required: true },
+    title: { type: String, default: "New chat" },
+    length: { type: String, enum: ["brief", "standard", "detailed"], default: "standard" },
+    messages: [
+      {
+        _id: false,
+        role: { type: String, enum: ["user", "assistant"], required: true },
+        content: { type: String, required: true },
+        at: { type: Date, default: Date.now },
+        inputTokens: { type: Number, default: 0 },
+        outputTokens: { type: Number, default: 0 },
+        truncated: { type: Boolean, default: false },
+        includeRaw: { type: Boolean, default: false },
+      },
+    ],
+    inputTokens: { type: Number, default: 0 },
+    outputTokens: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
+AnalysisChatSchema.index({ formId: 1, userId: 1, updatedAt: -1 });

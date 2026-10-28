@@ -18,7 +18,9 @@ import TeamsPage from "./components/TeamsPage.jsx";
 import PublicBar from "./components/PublicBar.jsx";
 import PricingPage from "./components/PricingPage.jsx";
 import ApprovalsPage from "./components/ApprovalsPage.jsx";
+import ResetPassword from "./components/ResetPassword.jsx";
 import { api, getUser, getToken, saveUser, clearSession } from "./api.js";
+import { confirmLeave } from "./lib/navGuard.js";
 
 /** Parses the hash into a route. Real routes so browser back/forward work. */
 function parseHash(hash) {
@@ -28,17 +30,22 @@ function parseHash(hash) {
   if (h === "/explore") return { name: "explore" };
   if (h === "/admin" || h === "/reports") return { name: "admin" };
   if (h === "/settings") return { name: "settings" };
+  const settingsTab = h.match(/^\/settings\/(appearance|ai|usage|notifications|database|account)$/);
+  if (settingsTab) return { name: "settings", tab: settingsTab[1] };
   if (h === "/teams") return { name: "teams" };
   if (h === "/pricing") return { name: "pricing" };
   if (h === "/approvals") return { name: "approvals" };
   const joinMatch = h.match(/^\/join\/([A-Za-z0-9-]{4,24})$/);
   if (joinMatch) return { name: "join", code: joinMatch[1] };
   if (h === "/new") return { name: "new" };
+  const resetMatch = h.match(/^\/reset\?token=([A-Za-z0-9_-]+)$/);
+  if (resetMatch) return { name: "reset", token: resetMatch[1] };
+  if (h === "/forgot") return { name: "forgot" };
   const verifyMatch = h.match(/^\/verify\?token=([A-Za-z0-9_-]+)$/);
   if (verifyMatch) return { name: "verify", token: verifyMatch[1] };
   const editMatch = h.match(/^\/edit\/([a-fA-F0-9]+)$/);
   if (editMatch) return { name: "edit", id: editMatch[1] };
-  const publicMatch = h.match(/^\/f\/([a-fA-F0-9]+)$/);
+  const publicMatch = h.match(/^\/f\/([^/?#]+)$/);
   if (publicMatch) return { name: "public", id: publicMatch[1] };
   return { name: "home" };
 }
@@ -69,7 +76,13 @@ function JoinCompany({ code, user, onUser, onDone }) {
   }
   return (
     <div className="auth-page"><div className="auth-center"><div className="auth-side"><div className="auth-card">
-      {bad ? <h2 className="auth-title">This company link is not valid or is no longer accepting members.</h2> : (
+      {bad ? (
+        <>
+          <h2 className="auth-title">This company link is not valid</h2>
+          <p className="auth-sub">It may have been replaced, or the company is no longer accepting members. Ask the company admin for a new link.</p>
+          <button className="primary" onClick={onDone}>Go to your forms</button>
+        </>
+      ) : (
         <>
           <div className="join-banner"><span>You are invited to join</span><strong>{name || "..."}</strong></div>
           <p className="auth-sub">You are signed in as {user.email}. A company admin will approve your request.</p>
@@ -77,8 +90,23 @@ function JoinCompany({ code, user, onUser, onDone }) {
           <button className="primary" disabled={busy || !name} onClick={join}>{busy ? "Please wait..." : "Request to join"}</button>
         </>
       )}
-      <button className="link-btn" onClick={onDone}>Not now</button>
+      {!bad && <button className="link-btn" onClick={onDone}>Not now</button>}
     </div></div></div></div>
+  );
+}
+
+/** Shown for a link to a form that doesn't exist (or isn't published). */
+function FormNotFound({ message }) {
+  return (
+    <div className="public-page">
+      <div className="not-found">
+        <Logo variant="horizontal" height={30} />
+        <h1>{message === "Form not found" || !message ? "This form isn't available" : message}</h1>
+        <p>The link may be mistyped, or the form was unpublished or deleted. Check with the person who sent it.</p>
+        <a className="primary btn-link solid" href="#/explore">Go to GUUT Forms</a>
+      </div>
+      <ReportWidget />
+    </div>
   );
 }
 
@@ -90,8 +118,17 @@ function PublicFormPage({ id, user, onSaveTemplate }) {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
+    if (!/^[a-f\d]{24}$/i.test(id)) { setError("Form not found"); return; }
     api.getForm(id).then(setForm).catch((e) => setError(e.message));
   }, [id]);
+  useEffect(() => { if (form?.title) document.title = `${form.title} | GUUT Forms`; return () => { document.title = "GUUT Forms"; }; }, [form?.title]);
+  // Paint the owner's background behind everything, including the scrollbar gutter.
+  useEffect(() => {
+    const bg = form?.theme?.backgroundColor;
+    if (!bg) return;
+    document.body.style.background = bg;
+    return () => { document.body.style.background = ""; };
+  }, [form?.theme?.backgroundColor]);
 
   async function handleSaveTemplate() {
     setSaving(true);
@@ -107,26 +144,29 @@ function PublicFormPage({ id, user, onSaveTemplate }) {
     }
   }
 
-  if (error) return <div className="app-shell"><p className="error">{error}</p><ReportWidget /></div>;
-  if (!form) return <div className="app-shell"><p>Loading...</p></div>;
+  if (error) return <FormNotFound message={error} />;
+  if (!form) return <div className="public-page"><p className="public-loading">Loading...</p></div>;
+  // The owner's background covers the whole page, not just a band around the card.
   return (
-    <div className="app-shell public-form-shell">
-      {user && (
-        <div className="save-template-bar">
-          <button className="secondary small" disabled={saving || saved} onClick={handleSaveTemplate}>
-            {saved ? "Saved to your forms ✓" : saving ? "Saving..." : "Save as template"}
-          </button>
-          {saveError && <span className="error">{saveError}</span>}
-        </div>
-      )}
-      <FormRenderer form={form} />
-      {!form.hideBranding && (
-        <div className="public-foot">
-          <a href="/" aria-label="Made with GUUT Forms">
-            <Logo variant="mark" height={18} /> Made with GUUT Forms
-          </a>
-        </div>
-      )}
+    <div className="public-page" style={{ background: form.theme?.backgroundColor || "#f6f7fb" }}>
+      <div className="app-shell public-form-shell">
+        {user && (
+          <div className="save-template-bar">
+            <button className="secondary small" disabled={saving || saved} onClick={handleSaveTemplate}>
+              {saved ? "Saved to your forms" : saving ? "Saving..." : "Save as template"}
+            </button>
+            {saveError && <span className="error">{saveError}</span>}
+          </div>
+        )}
+        <FormRenderer form={form} fullPage hideBranding={!!form.hideBranding} />
+        {!form.hideBranding && (
+          <div className="public-foot">
+            <a href="/" aria-label="Made with GUUT Forms">
+              <Logo variant="mark" height={18} /> Made with GUUT Forms
+            </a>
+          </div>
+        )}
+      </div>
       <ReportWidget />
     </div>
   );
@@ -143,8 +183,18 @@ export default function App() {
   const [approvalCount, setApprovalCount] = useState(0);
   const pendingDraft = useRef(null); // unsaved draft for the "/new" route, not URL-addressable
 
+  // Every in-app link changes the hash. If the builder has unsaved changes, ask first; staying puts the
+  // previous address back without reloading anything.
+  const lastHash = useRef(window.location.hash);
   useEffect(() => {
-    const onHashChange = () => setRoute(parseHash(window.location.hash));
+    const onHashChange = () => {
+      if (!confirmLeave()) {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${lastHash.current || "#/"}`);
+        return;
+      }
+      lastHash.current = window.location.hash;
+      setRoute(parseHash(window.location.hash));
+    };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
@@ -171,8 +221,11 @@ export default function App() {
     return () => window.removeEventListener("guut:session-expired", onExpired);
   }, []);
 
-  // Apply the account's theme preference (or the OS default pre-login).
+  // Apply the account's theme preference (or the OS default pre-login). Public forms always render in the
+  // owner's (light) design, whatever the respondent's device prefers.
+  const isPublicForm = route.name === "public";
   useEffect(() => {
+    if (isPublicForm) { document.documentElement.dataset.theme = "light"; return; }
     applyThemeToDocument(user?.settings?.theme || "system");
     if (!user?.settings?.theme || user.settings.theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -180,7 +233,7 @@ export default function App() {
       mq.addEventListener?.("change", onChange);
       return () => mq.removeEventListener?.("change", onChange);
     }
-  }, [user?.settings?.theme]);
+  }, [user?.settings?.theme, isPublicForm]);
 
   useEffect(() => {
     if (route.name === "edit") {
@@ -227,7 +280,7 @@ export default function App() {
 
   const inWorkspace = route.name === "new" || route.name === "edit";
   // The email-confirmation link must work for someone who is not signed in yet.
-  const isPublicRoute = ["about", "explore", "verify", "pricing"].includes(route.name);
+  const isPublicRoute = ["about", "explore", "verify", "pricing", "reset", "forgot"].includes(route.name);
   const isBusiness = user?.company?.type === "business";
   const isCompanyAdmin = isBusiness && user?.role === "admin";
   const waiting = ["pending", "declined"].includes(user?.membership?.status) && !user?.companyId;
@@ -300,11 +353,18 @@ export default function App() {
             {route.name === "about" && <AboutPage />}
 
             {route.name === "pricing" && (
-              <PricingPage onChoose={(kind, plan) => { setAuthInitial({ mode: "create", type: kind, plan }); navigate("/"); }} />
+              <PricingPage user={user} onChoose={(kind, plan) => {
+                if (user) { navigate(user.role === "admin" && user.company?.type === "business" ? "/admin" : "/"); return; }
+                setAuthInitial({ mode: "create", type: kind, plan }); navigate("/");
+              }} />
             )}
 
             {route.name === "approvals" && (
               isCompanyAdmin ? <ApprovalsPage onCount={setApprovalCount} /> : <div className="empty-hint"><p>Approvals are for company admins.</p></div>
+            )}
+
+            {(route.name === "reset" || route.name === "forgot") && (
+              <ResetPassword token={route.token} onAuth={(u) => { setUser(u); navigate("/"); }} />
             )}
 
             {route.name === "verify" && (
@@ -320,7 +380,7 @@ export default function App() {
             {route.name === "teams" && <TeamsPage user={user} />}
 
             {route.name === "settings" && (
-              <SettingsPage user={user} onUserUpdated={(u) => setUser(u)} />
+              <SettingsPage key={route.tab || "settings"} initialTab={route.tab} user={user} onUserUpdated={(u) => setUser(u)} />
             )}
 
             {route.name === "new" && (

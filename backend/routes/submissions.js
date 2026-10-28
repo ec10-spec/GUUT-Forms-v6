@@ -12,6 +12,10 @@ import { assertStorageRoom, bumpStorage, submissionSize } from "../utils/storage
 import { httpError } from "../utils/http.js";
 import { parseWorkbook, suggestMapping, cleanRows } from "../utils/importer.js";
 import { logger } from "../utils/logger.js";
+import { cleanSubmission, isFileRef } from "../utils/answers.js";
+import { findFile, signedFileUrl } from "../utils/uploads.js";
+import { safeTz, localDateTime } from "../utils/time.js";
+import { appUrl } from "../utils/mailer.js";
 
 const router = Router();
 
@@ -33,28 +37,42 @@ function assertOwner(req, idx) {
   if (!canView(accessOf(req, idx))) throw httpError(403, "You don't have access to this form's responses.");
 }
 
-const isEmpty = (v) => v == null || v === "" || (Array.isArray(v) && v.length === 0);
-
-function isVisible(field, answers) {
-  if (!field.showIf?.fieldId) return true;
-  const val = answers[field.showIf.fieldId];
-  return Array.isArray(val) ? val.includes(field.showIf.equals) : String(val) === String(field.showIf.equals);
-}
-
-// Keeps only answers for real fields, caps sizes, and enforces required fields.
+/** Validates a live submission with the shared validator. Every problem is returned, the first one as the message. */
 function cleanAnswers(form, raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw httpError(400, "answers must be an object.");
-  const answers = {};
-  for (const f of form.fields) {
-    let v = raw[f.id];
-    if (Array.isArray(v)) v = v.slice(0, 100).map((x) => String(x).slice(0, 1000));
-    else if (v != null && typeof v !== "number" && typeof v !== "boolean") v = String(v).slice(0, 10000);
-    answers[f.id] = v ?? "";
-  }
-  for (const f of form.fields) {
-    if (f.required && isVisible(f, answers) && isEmpty(answers[f.id])) throw httpError(400, `"${f.label}" is required.`);
-  }
+  const { answers, errors } = cleanSubmission(form, raw);
+  if (errors.length) throw httpError(400, errors[0].message, { code: "INVALID_ANSWERS", fields: errors });
   return answers;
+}
+
+/** Replaces each file answer with the stored file's real name, size and type, and checks it belongs to this question. */
+async function resolveFiles(tenant, form, answers) {
+  const ids = [];
+  for (const f of form.fields) {
+    const v = answers[f.id];
+    if (f.type !== "file" || !isFileRef(v)) continue;
+    const file = await findFile(tenant, "uploads", v.fileId);
+    if (!file || file.metadata?.formId !== String(form._id) || file.metadata?.fieldId !== f.id || file.metadata?.submissionId) {
+      throw httpError(400, `"${f.label}": the file wasn't uploaded. Attach it again.`, { code: "INVALID_ANSWERS" });
+    }
+    answers[f.id] = { fileId: String(file._id), name: file.filename, size: file.length, type: file.contentType || file.metadata?.contentType || "" };
+    ids.push(file._id);
+  }
+  return ids;
+}
+
+// Adds a signed, short-lived link to every file answer so the Responses table can show it.
+function withFileLinks(form, rows, ttlSec, base = "") {
+  const fileFields = form.fields.filter((f) => f.type === "file").map((f) => f.id);
+  if (!fileFields.length) return rows;
+  return rows.map((r) => {
+    const o = r.toObject ? r.toObject() : { ...r };
+    for (const id of fileFields) {
+      const v = o.answers?.[id];
+      if (isFileRef(v)) o.answers[id] = { ...v, url: signedFileUrl(String(form._id), v.fileId, ttlSec, base) };
+    }
+    return o;
+  });
 }
 
 // Public: anyone with the link can respond, but only to a published form.
@@ -67,9 +85,11 @@ router.post("/:formId", submitLimiter, async (req, res) => {
   const company = await Company.findById(idx.companyId);
   await assertCanReceiveResponse(company, tenant, FormIndex);
   const answers = cleanAnswers(form, req.body?.answers);
+  const fileIds = await resolveFiles(tenant, form, answers);
   const size = submissionSize(answers);
   await assertStorageRoom(company, size, { forVisitor: true }); // a visitor never sees the owner's billing details
   const submission = await tenant.Submission.create({ formId: form._id, answers, sizeBytes: size });
+  if (fileIds.length) await tenant.conn.db.collection("uploads.files").updateMany({ _id: { $in: fileIds } }, { $set: { "metadata.submissionId": String(submission._id) } });
   await bumpStorage(idx.companyId, size);
   notifyResponse(idx); // best effort, never blocks or fails the respondent
   res.status(201).json({ _id: submission._id, createdAt: submission.createdAt });
@@ -79,10 +99,12 @@ router.post("/:formId", submitLimiter, async (req, res) => {
 router.get("/:formId", requireAuth, async (req, res) => {
   const { idx, tenant } = await locate(req, req.params.formId);
   assertOwner(req, idx);
-  let rows = await tenant.Submission.find({ formId: idx._id }).sort({ createdAt: -1 }).limit(5000);
+  const form = await tenant.Form.findById(idx._id).lean();
+  let rows = await tenant.Submission.find({ formId: idx._id }).sort({ createdAt: -1 }).limit(5000).lean();
   const q = String(req.query.q || "").trim().toLowerCase();
-  if (q) rows = rows.filter((s) => Object.values(s.answers || {}).some((v) => String(v).toLowerCase().includes(q)));
-  res.json(rows);
+  const text = (v) => (isFileRef(v) ? v.name : Array.isArray(v) ? v.join(", ") : String(v ?? ""));
+  if (q) rows = rows.filter((s) => Object.values(s.answers || {}).some((v) => text(v).toLowerCase().includes(q)));
+  res.json(form ? withFileLinks(form, rows, 24 * 3600) : rows);
 });
 
 
@@ -113,7 +135,10 @@ router.post("/:formId/import", requireAuth, async (req, res) => {
   const { headers, rows } = parseWorkbook(req.body?.base64, req.body?.filename);
   const fields = [...form.fields].sort((a, b) => a.order - b.order);
   const cleaned = cleanRows({ fields, headers, rows, mapping: req.body?.mapping || {}, timestampColumn: req.body?.timestampColumn || null });
-  const summary = { total: rows.length, importable: cleaned.rows.length, skipped: cleaned.skipped, issueCount: cleaned.issues.length, issues: cleaned.issues.slice(0, 30) };
+  const summary = {
+    total: rows.length, importable: cleaned.rows.length, skipped: cleaned.skipped, skippedEmpty: cleaned.skippedEmpty,
+    skippedMissing: cleaned.skippedMissing, badTimestamps: cleaned.badTimestamps, issueCount: cleaned.issues.length, issues: cleaned.issues.slice(0, 50),
+  };
   if (req.body?.dryRun) {
     return res.json({ dryRun: true, ...summary, preview: cleaned.rows.slice(0, 5).map((r) => r.answers) });
   }
@@ -133,8 +158,10 @@ router.get("/:formId/export.csv", requireAuth, async (req, res) => {
   assertOwner(req, idx);
   const form = await tenant.Form.findById(idx._id);
   if (!form) throw httpError(404, "Form not found");
-  const rows = await tenant.Submission.find({ formId: idx._id }).sort({ createdAt: 1 });
-  const csv = new CsvParser(form.fields.map((f) => ({ id: f.id, label: f.label }))).toCsv(rows);
+  const tz = safeTz(req.query.tz);
+  const rows = withFileLinks(form, await tenant.Submission.find({ formId: idx._id }).sort({ createdAt: 1 }).lean(), 7 * 24 * 3600, appUrl());
+  const fields = [...form.fields].sort((a, b) => a.order - b.order);
+  const csv = new CsvParser(fields.map((f) => ({ id: f.id, label: f.label, type: f.type })), { tz }).toCsv(rows);
   logger.info("form", `CSV export: ${form.title}`, { req, meta: { formId: idx._id, rows: rows.length } });
   res.header("Content-Type", "text/csv");
   res.attachment(`${form.title.replace(/[^\w-]+/g, "_")}_submissions.csv`);
@@ -149,6 +176,7 @@ router.get("/:formId/export.pdf", requireAuth, async (req, res) => {
   if (!form) throw httpError(404, "Form not found");
   const rows = await tenant.Submission.find({ formId: idx._id }).sort({ createdAt: 1 }).limit(2000);
   const fields = [...form.fields].sort((a, b) => a.order - b.order);
+  const tz = safeTz(req.query.tz);
   logger.info("form", `PDF export: ${form.title}`, { req, meta: { formId: idx._id, rows: rows.length } });
   res.header("Content-Type", "application/pdf");
   res.attachment(`${form.title.replace(/[^\w-]+/g, "_")}_responses.pdf`);
@@ -157,18 +185,18 @@ router.get("/:formId/export.pdf", requireAuth, async (req, res) => {
   const navy = "#001549", muted = "#6b7280";
   doc.fillColor(navy).font("Helvetica-Bold").fontSize(20).text(form.title);
   doc.moveDown(0.2).fillColor(muted).font("Helvetica").fontSize(10)
-    .text(`${rows.length} response${rows.length === 1 ? "" : "s"}  |  Exported ${new Date().toISOString().slice(0, 10)}  |  GUUT Forms`);
+    .text(`${rows.length} response${rows.length === 1 ? "" : "s"}  |  Exported ${localDateTime(new Date(), tz)} (${tz})  |  GUUT Forms`);
   doc.moveDown(1);
   if (!rows.length) doc.fillColor(muted).fontSize(12).text("No responses yet.");
   rows.forEach((r, i) => {
     if (doc.y > 700) doc.addPage();
     doc.fillColor("#F3BA28").circle(doc.page.margins.left + 4, doc.y + 6, 3.5).fill();
     doc.fillColor(navy).font("Helvetica-Bold").fontSize(11).text(`Response ${i + 1}`, doc.page.margins.left + 14, doc.y, { continued: true })
-      .fillColor(muted).font("Helvetica").fontSize(9).text(`   ${new Date(r.createdAt).toLocaleString("en-US", { timeZone: "UTC" })} UTC`);
+      .fillColor(muted).font("Helvetica").fontSize(9).text(`   ${localDateTime(r.createdAt, tz)} (${tz})${r.imported ? ", imported" : ""}`);
     doc.moveDown(0.3);
     for (const f of fields) {
       const v = r.answers?.[f.id];
-      const text = Array.isArray(v) ? v.join(", ") : v === undefined || v === null || v === "" ? "-" : String(v);
+      const text = isFileRef(v) ? `File: ${v.name}` : Array.isArray(v) ? (v.length ? v.join(", ") : "-") : v === undefined || v === null || v === "" ? "-" : String(v);
       if (doc.y > 760) doc.addPage();
       doc.fillColor(muted).font("Helvetica").fontSize(9).text(f.label, doc.page.margins.left + 14);
       doc.fillColor("#1a1d29").font("Helvetica").fontSize(11).text(text.length > 1500 ? text.slice(0, 1500) + "..." : text, { width: 480 });

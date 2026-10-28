@@ -24,6 +24,12 @@ const UserSchema = new mongoose.Schema(
     // an admin, and accounts that existed before this was added, count as confirmed.
     emailVerified: { type: Boolean, default: true },
     emailVerification: { tokenHash: { type: String, default: null }, expiresAt: { type: Date, default: null } },
+    // "Forgot password": a single-use link (only its hash is stored).
+    passwordReset: { tokenHash: { type: String, default: null }, expiresAt: { type: Date, default: null } },
+    // Bumped whenever the password changes (or an admin resets it). Sign-in tokens carry the version they
+    // were issued with, and older ones stop working, so a changed password signs out every other device.
+    tokenVersion: { type: Number, default: 0 },
+    passwordChangedAt: { type: Date, default: null },
     // Employees who signed up with a company code wait here until a company admin approves them.
     // pending/declined users have no company (and so no forms) until then.
     membership: {
@@ -64,6 +70,8 @@ const hintOf = (enc) => { try { return enc ? decrypt(enc).slice(-4) : ""; } catc
 UserSchema.set("toJSON", {
   transform: (_doc, ret) => {
     delete ret.emailVerification;
+    delete ret.passwordReset;
+    delete ret.tokenVersion;
     const ai = ret.ai || {};
     ret.ai = {
       provider: ai.provider || "anthropic",
@@ -80,5 +88,13 @@ UserSchema.set("toJSON", {
     return ret;
   },
 });
+
+/** Sets a new password and invalidates every existing session. */
+UserSchema.methods.setPasswordHash = function setPasswordHash(hash) {
+  this.passwordHash = hash;
+  this.tokenVersion = (this.tokenVersion || 0) + 1;
+  this.passwordChangedAt = new Date();
+  this.passwordReset = { tokenHash: null, expiresAt: null };
+};
 
 export default mongoose.model("User", UserSchema);

@@ -46,13 +46,17 @@ function fieldHtml(f) {
         .map((n) => `<button type="button" class="rating-star" data-value="${n}">&#9733;</button>`)
         .join("")}<input type="hidden" name="${esc(f.id)}" /></div>`;
       break;
-    case "file":
-      input = `<input type="file" name="${esc(f.id)}" ${req} />`;
+    case "file": {
+      const kinds = (f.accept?.length ? f.accept : ["image", "pdf"]);
+      const ext = { image: ".png,.jpg,.jpeg,.gif,.webp", pdf: ".pdf", document: ".doc,.docx", spreadsheet: ".xls,.xlsx,.csv", text: ".txt" };
+      input = `<input type="file" name="${esc(f.id)}" accept="${esc(kinds.map((k) => ext[k]).filter(Boolean).join(","))}" aria-label="${esc(f.label)}" ${req} />`;
       break;
+    }
     default:
       input = `<input type="text" name="${esc(f.id)}" ${req} />`;
   }
-  return `<div class="field" data-show-if-field="${esc(f.showIf?.fieldId || "")}" data-show-if-equals="${esc(f.showIf?.equals || "")}">${label}${input}</div>`;
+  const values = f.showIf?.values?.length ? f.showIf.values : f.showIf?.equals != null ? [f.showIf.equals] : [];
+  return `<div class="field" data-show-if-field="${esc(f.showIf?.fieldId || "")}" data-show-if-op="${esc(f.showIf?.op || "eq")}" data-show-if-values="${esc(JSON.stringify(values))}">${label}${input}</div>`;
 }
 
 export function generateStandaloneHtml(form, apiBase) {
@@ -61,6 +65,7 @@ export function generateStandaloneHtml(form, apiBase) {
   const bg = theme.backgroundColor || "#f6f7fb";
   const fields = [...form.fields].sort((a, b) => a.order - b.order);
   const base = (apiBase || "").replace(/\/$/, "");
+  const headerImage = theme.headerImage && theme.headerImage.startsWith("/api/") ? base + theme.headerImage : theme.headerImage;
 
   return `<!doctype html>
 <html lang="en">
@@ -97,6 +102,7 @@ export function generateStandaloneHtml(form, apiBase) {
 <body>
 <div class="wrap">
   <form id="f">
+    ${headerImage ? `<img src="${esc(headerImage)}" alt="" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin-bottom:16px" />` : ""}
     <h1>${esc(form.title)}</h1>
     ${form.description ? `<p class="desc">${esc(form.description)}</p>` : ""}
     ${fields.map(fieldHtml).join("\n")}
@@ -127,16 +133,29 @@ export function generateStandaloneHtml(form, apiBase) {
     });
   });
 
-  // Basic show/hide logic, mirroring the builder's showIf rules
+  // Show/hide logic, mirroring the builder's rules (equals, is one of, at most, at least).
+  function met(op, values, answers) {
+    answers = answers.filter(function (a) { return a !== ""; });
+    if (!answers.length || !values.length) return false;
+    if (op === "lte" || op === "gte") {
+      var a = answers[0], b = values[0];
+      var na = Number(a), nb = Number(b);
+      var d = !isNaN(na) && !isNaN(nb) && a !== "" ? na - nb : a < b ? -1 : a > b ? 1 : 0;
+      return op === "lte" ? d <= 0 : d >= 0;
+    }
+    if (op === "in") return answers.some(function (x) { return values.indexOf(x) !== -1; });
+    return answers.indexOf(values[0]) !== -1 || (Number(answers[0]) === Number(values[0]) && answers[0] !== "");
+  }
   function applyLogic() {
     var data = new FormData(form);
     document.querySelectorAll(".field[data-show-if-field]").forEach(function (el) {
       var fid = el.dataset.showIfField;
       if (!fid) { el.classList.remove("hidden"); return; }
-      var equals = el.dataset.showIfEquals;
-      var vals = data.getAll(fid);
-      var match = vals.length ? vals.indexOf(equals) !== -1 : String(data.get(fid) || "") === equals;
-      el.classList.toggle("hidden", !match);
+      var srcEl = form.querySelector('[name="' + fid + '"]');
+      var srcHidden = srcEl && srcEl.closest(".field") && srcEl.closest(".field").classList.contains("hidden");
+      var show = !srcHidden && met(el.dataset.showIfOp || "eq", JSON.parse(el.dataset.showIfValues || "[]"), data.getAll(fid).map(String));
+      el.classList.toggle("hidden", !show);
+      el.querySelectorAll("input,select,textarea").forEach(function (i) { if (i.hasAttribute("required") || i.dataset.req) { i.dataset.req = "1"; i.required = show; } });
     });
   }
   form.addEventListener("input", applyLogic);
@@ -148,12 +167,14 @@ export function generateStandaloneHtml(form, apiBase) {
     err.classList.add("hidden");
     var data = new FormData(form);
     var answers = {};
-    ${JSON.stringify(fields)}.forEach(function (f) {
+    var uploads = [];
+    ${JSON.stringify(fields.map((f) => ({ id: f.id, type: f.type })))}.forEach(function (f) {
       if (f.type === "checkbox") {
         answers[f.id] = data.getAll(f.id);
       } else if (f.type === "file") {
         var file = data.get(f.id);
-        answers[f.id] = file && file.name ? file.name : "";
+        answers[f.id] = "";
+        if (file && file.name && file.size) uploads.push({ id: f.id, file: file });
       } else {
         answers[f.id] = data.get(f.id) || "";
       }
@@ -161,11 +182,21 @@ export function generateStandaloneHtml(form, apiBase) {
     var btn = form.querySelector("button.submit");
     btn.disabled = true;
     btn.textContent = "Submitting...";
-    fetch(API_BASE + "/api/submissions/" + FORM_ID, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers: answers }),
-    })
+    // Files go up first; the response then refers to them.
+    uploads.reduce(function (p, u) {
+      return p.then(function () {
+        return fetch(API_BASE + "/api/uploads/" + FORM_ID + "/" + encodeURIComponent(u.id), {
+          method: "POST", headers: { "Content-Type": u.file.type || "application/octet-stream", "X-Filename": encodeURIComponent(u.file.name) }, body: u.file,
+        }).then(function (res) { return res.json().then(function (b) { if (!res.ok) throw new Error(b.error || "Upload failed"); answers[u.id] = b; }); });
+      });
+    }, Promise.resolve())
+      .then(function () {
+        return fetch(API_BASE + "/api/submissions/" + FORM_ID, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answers: answers }),
+        });
+      })
       .then(function (res) {
         if (!res.ok) return res.json().then(function (b) { throw new Error(b.error || "Submission failed"); });
         form.classList.add("hidden");

@@ -25,6 +25,7 @@ import usageRouter from "./routes/usage.js";
 import plansRouter from "./routes/plans.js";
 import teamsRouter from "./routes/teams.js";
 import notificationsRouter from "./routes/notifications.js";
+import uploadsRouter from "./routes/uploads.js";
 import { startNotificationScheduler } from "./utils/notify.js";
 import { purgeStaleUnverified, warnIfMisconfigured } from "./utils/emailVerification.js";
 
@@ -61,6 +62,7 @@ app.use("/api/usage", usageRouter);
 app.use("/api/plans", plansRouter);
 app.use("/api/teams", teamsRouter);
 app.use("/api/notifications", notificationsRouter);
+app.use("/api/uploads", uploadsRouter);
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 
 // Serve the built frontend when it exists (single-service deploy, e.g. Render).
@@ -74,7 +76,7 @@ if (fs.existsSync(distDir)) {
 // Central error handler: every thrown/rejected error in a route ends up here.
 // 4xx messages are shown to the client; 5xx are logged to MongoDB and hidden.
 app.use((err, req, res, _next) => {
-  const status = err.status || (err.name === "ValidationError" || err.name === "CastError" ? 400 : 500);
+  const status = err.status || (err.type === "entity.too.large" ? 413 : err.name === "ValidationError" || err.name === "CastError" ? 400 : 500);
   if (status >= 500) {
     if (err.logCompanyId) req.logCompanyId = err.logCompanyId;
     // A customer database being unreachable is that company's problem to fix, so it's filed under "db".
@@ -83,8 +85,9 @@ app.use((err, req, res, _next) => {
   }
   if (res.headersSent) return;
   res.status(status).json({
-    error: status >= 500 && !err.code ? "Something went wrong on our end. The team has been notified." : err.message,
+    error: status >= 500 && !err.code ? "Something went wrong on our end. The team has been notified." : status === 413 && !err.code ? "That file is too large." : err.message,
     ...(err.code ? { code: err.code } : {}),
+    ...(Array.isArray(err.fields) ? { fields: err.fields.map(({ fieldId, message }) => ({ fieldId, message })) } : {}),
   });
 });
 

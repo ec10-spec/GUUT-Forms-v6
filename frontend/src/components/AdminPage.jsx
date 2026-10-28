@@ -67,7 +67,7 @@ function Team({ currentUser }) {
 
   return (
     <div>
-      <p className="settings-hint">Add the people who will build forms. They sign in with the <strong>User login</strong> tab using the email and temporary password you set here.</p>
+      <p className="settings-hint">Add the people who will build forms. They sign in on the GUUT Forms sign-in page with the email and temporary password you set here.</p>
       {error && <p className="error">{error}</p>}
       <form className="inline-form wrap" onSubmit={create}>
         <input type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />

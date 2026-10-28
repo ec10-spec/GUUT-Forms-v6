@@ -15,7 +15,12 @@ export default function SharePeopleModal({ form, onClose }) {
   const [role, setRole] = useState("viewer");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const individual = getUser()?.company?.type === "individual";
+  const [errorCode, setErrorCode] = useState(null);
+  const [invite, setInvite] = useState(null); // { email, link } when offering to invite a non-member
+  const [copied, setCopied] = useState(false);
+  const me = getUser();
+  const individual = me?.company?.type === "individual";
+  const isCompanyAdmin = me?.company?.type === "business" && me?.role === "admin";
 
   async function load() {
     try {
@@ -27,8 +32,16 @@ export default function SharePeopleModal({ form, onClose }) {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [form._id]);
 
   async function run(fn) {
-    setBusy(true); setError(null);
-    try { await fn(); await load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+    setBusy(true); setError(null); setErrorCode(null); setInvite(null);
+    try { await fn(); await load(); } catch (err) { setError(err.message); setErrorCode(err.code || null); } finally { setBusy(false); }
+  }
+
+  // Someone outside the company: admins can send them the company's join link; members ask an admin.
+  async function offerInvite() {
+    try {
+      const j = await api.companyJoin();
+      setInvite({ email, link: `${window.location.origin}${window.location.pathname}#/join/${j.code}`, enabled: j.enabled });
+    } catch (err) { setError(err.message); }
   }
 
   const [teamId, setTeamId] = useState("");
@@ -43,7 +56,24 @@ export default function SharePeopleModal({ form, onClose }) {
           <h2>Share "{form.title}"</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <div className="error-inline">
+            <p className="error">{error}</p>
+            {errorCode === "NOT_A_MEMBER" && (isCompanyAdmin
+              ? <button className="secondary small" onClick={offerInvite}>Invite them to join your company</button>
+              : <span className="settings-hint small">Ask your company admin to invite them to the company first.</span>)}
+          </div>
+        )}
+        {invite && (
+          <div className="invite-box">
+            <p className="settings-hint">Send {invite.email || "them"} this link. Once they join and you approve them under Approvals, you can share the form.{invite.enabled ? "" : " Your company isn't accepting new requests right now: turn that on in Admin, Team."}</p>
+            <div className="code-row">
+              <code className="join-code link">{invite.link}</code>
+              <button className="primary small" onClick={() => { navigator.clipboard?.writeText(invite.link); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy link"}</button>
+              <a className="secondary small btn-link" href={`mailto:${encodeURIComponent(invite.email || "")}?subject=${encodeURIComponent(`Join ${me?.company?.name || "our company"} on GUUT Forms`)}&body=${encodeURIComponent(`Join our workspace on GUUT Forms: ${invite.link}`)}`}>Email it</a>
+            </div>
+          </div>
+        )}
         {!info ? <p className="empty-hint">Loading...</p> : !info.canManage ? (
           <p className="settings-hint">You have {info.myAccess} access to this form. Only the owner or a company admin can change who has access.</p>
         ) : (

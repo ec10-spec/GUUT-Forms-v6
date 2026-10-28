@@ -6,6 +6,32 @@ Local: `bash run.sh` (a dev platform-team login is printed on first start).
 
 ---
 
+## v12 changes: QA round fixes
+
+The full list, item by item, is in `CHANGES-QA-ROUND.md`. What changes for whoever runs the app:
+
+- **New environment variables (all optional).** `PLATFORM_DB_NAME` (see below) and `AI_PRICES_JSON` (override per-model prices; `COST_PER_1K_TOKENS_USD` is no longer used).
+- **Files are stored in the database.** Respondents' uploads and form header images are kept with GridFS in the same database as the form's responses (`uploads.*` and `assets.*` collections), and count toward storage.
+- **Saved AI chats** live in a new `analysischats` collection next to the responses.
+- **Sessions end when a password changes.** Everyone stays signed in after this deploy; from then on, changing or resetting a password signs out other devices.
+- **Forgot password** works today; the email only goes out once SMTP is set (same as sign-up confirmation).
+
+### Database: moving off `test` (do this once)
+The Render `MONGO_URI` has no database name, so accounts ended up in a database called `test`. The app keeps using `test` until you move it, and logs a warning on start.
+1. From your computer, in `backend/`: `MONGO_URI="<your Atlas link>" npm run migrate:platform-db -- --dry-run`, then the same without `--dry-run`. It copies the 7 platform collections into `guut_platform` and checks the counts. Nothing is deleted.
+2. In Render, add `PLATFORM_DB_NAME=guut_platform` and redeploy. Sign in and check your forms and users.
+3. After a few days, drop the `test` database in Atlas (Browse Collections, then the bin icon next to `test`).
+
+### Database: backups (Atlas M0 has none)
+- `MONGO_URI="..." npm run backup` writes gzipped exports of the platform and hosted databases to `backend/backups/<time>/` and keeps the newest 14. `npm run restore -- backups/<time>` restores into new `*_restore` databases, so nothing live is overwritten.
+- Daily and automatic: copy `docs/backup-workflow.yml` to `.github/workflows/backup.yml` and add a repository secret `MONGO_URI` (the app-only user's link, see below). GitHub keeps each day's backup as a private artifact for 14 days.
+- Moving to a paid Atlas tier (M10 and up) turns on Atlas's own continuous backups; keep the script as a second copy.
+
+### Database: settings to change in Atlas (not code)
+- Create an app-only database user: Database Access, Add New Database User, password auth, Built-in Role: none, Specific Privileges: `readWrite` on `guut_platform` and `readWrite` on `guut_hosted` (and on `test` until step 3 above). Put its link in Render's `MONGO_URI`. Keep `EkasChadha` for yourself and remove `atlasAdmin` from any user the app uses.
+- Network Access: `0.0.0.0/0` has to stay while Render's free plan has no fixed outbound IPs. On a paid Render plan, replace it with Render's outbound IP ranges.
+- Optional: run `npm run migrate:header-images` once to move header images that older forms embedded as base64 into the file store (the Coffee Shop test form is about 845 KB of that).
+
 ## v4 changes: accounts, sharing, notifications, analytics, AI chat
 
 **Accounts.** See the v5 section below: anyone can sign up, and everyone uses one login page.
@@ -154,7 +180,7 @@ app treated that page as login-only. It now works for someone who isn't signed i
 - **Company join link.** A company admin copies the link under Admin (Invite people). People sign in or sign up through it and ask to join; an admin approves under Approvals. Someone whose personal account already has forms is asked to use another email.
 - **Approvals tab** (company admins). People asking to join, and forms waiting to be listed in the public repository. In a business, a member's "List in public repository" waits for admin approval; an admin's own listing is approved immediately.
 - **Import older responses.** Responses tab, Import. Upload CSV or Excel, check the column matching, run Check rows, then Import. Values are converted to each field's type; the original date column can be kept. Imported rows are marked.
-- **AI.** Each person uses their own key; nothing is shared across an organisation. Without a key, an account can use free AI credit: set `PLATFORM_AI_KEY` (and optionally `PLATFORM_AI_PROVIDER`, `FREE_AI_CREDIT_USD` default 5, `COST_PER_1K_TOKENS_USD` default 0.006 for the estimate). With no `PLATFORM_AI_KEY` there is no credit. The AI assistant tab has an Answer length control (Brief, Standard, Detailed) instead of a token slider. Form generation retries once with more room if the model was cut off.
+- **AI.** Each person uses their own key; nothing is shared across an organisation. Without a key, an account can use free AI credit: set `PLATFORM_AI_KEY` (and optionally `PLATFORM_AI_PROVIDER`, `FREE_AI_CREDIT_USD` default 5; spend is estimated with per-model prices, see v12). With no `PLATFORM_AI_KEY` there is no credit. The AI assistant tab has an Answer length control (Brief, Standard, Detailed) instead of a token slider. Form generation retries once with more room if the model was cut off.
 - **Templates and first-run guide.** Home has an All templates gallery (13 starters in five categories, defined in `frontend/src/lib/templates.js`), and people with no forms see a three-step guide.
 - **Branding.** Public forms from business accounts do not show the "Made with GUUT Forms" footer; free accounts do.
 - **Free AI credit is marketing only for now.** Pricing says "coming soon". Leave `PLATFORM_AI_KEY` unset and no credit is given; the mechanism is built and switches on when you set it.

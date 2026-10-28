@@ -1,0 +1,29 @@
+# Daily database backup. To turn it on: copy this file to .github/workflows/backup.yml and add a
+# repository secret MONGO_URI (Settings > Secrets and variables > Actions). Optional secret or variable:
+# PLATFORM_DB_NAME. Each run's backup is stored as a private workflow artifact for 14 days.
+name: Database backup
+on:
+  schedule:
+    - cron: "17 10 * * *" # daily, 10:17 UTC
+  workflow_dispatch: {}
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --omit=dev
+        working-directory: backend
+      - run: node scripts/backup.mjs --out ./backups --keep 1
+        working-directory: backend
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          PLATFORM_DB_NAME: ${{ secrets.PLATFORM_DB_NAME || vars.PLATFORM_DB_NAME }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guut-backup-${{ github.run_id }}
+          path: backend/backups
+          retention-days: 14

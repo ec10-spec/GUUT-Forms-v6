@@ -12,7 +12,7 @@ const USE_CASES = [
   },
   {
     title: "Sales & Marketing",
-    body: "Stand up a lead-capture or event RSVP form on short notice, publish it, and share the link directly — no design pass required to look presentable.",
+    body: "Stand up a lead-capture or event RSVP form on short notice, publish it, and share the link directly, no design pass required to look presentable.",
   },
   {
     title: "Operations Teams",
@@ -64,14 +64,14 @@ export default function AboutPage() {
       <section className="about-block">
         <h2>What makes it different</h2>
         <ul className="about-list">
-          <li><span className="dot" /> One page per form — build, preview, and read responses without switching screens.</li>
+          <li><span className="dot" /> One page per form: build, preview, and read responses without switching screens.</li>
           <li><span className="dot" /> A shareable link the moment you publish, no separate distribution step.</li>
           <li><span className="dot" /> Token usage visible and capped per query, so AI generation stays predictable to run.</li>
           <li><span className="dot" /> Built on MongoDB from the start, so responses are queryable data, not a file to reconcile later.</li>
         </ul>
       </section>
 
-      <p className="about-footer">GUUT Forms — part of the GUUT platform.</p>
+      <p className="about-footer">GUUT Forms, part of the GUUT platform.</p>
     </div>
   );
 }

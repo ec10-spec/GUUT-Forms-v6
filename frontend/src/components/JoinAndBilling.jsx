@@ -54,8 +54,8 @@ export function JoinPanel({ onChanged }) {
           <button className="small" disabled={busy} onClick={() => { if (confirm("Generate a new code? The current one will stop working.")) run(() => api.companyJoinRegenerate()); }}>New code</button>
           <label className="check-row inline">
             <input type="checkbox" checked={j.enabled} disabled={busy} onChange={(e) => run(() => api.companyJoinEnabled(e.target.checked))} />
-            Accepting new requests
-          </label>
+          <span>Accepting new requests</span>
+        </label>
         </div>
       </div>
     </div>
@@ -98,13 +98,13 @@ export function Billing() {
             <h3>{p.name}</h3>
             <div className="price">{p.priceLabel}</div>
             <ul>{p.features.map((x) => <li key={x}>{x}</li>)}</ul>
-            {p.id === b.plan ? <span className="access-badge">Current plan</span>
+            <div className="price-card-foot">{p.id === b.plan ? <span className="access-badge">Current plan</span>
               : p.id === b.requestedPlan ? <span className="access-badge subtle">Change requested</span>
-              : <button className="secondary small" disabled={busy} onClick={() => request(p.id)}>Request this plan</button>}
+              : <button className="secondary small" disabled={busy} onClick={() => request(p.id)}>Request this plan</button>}</div>
           </div>
         ))}
       </div>
-      <p className="settings-hint small">Online payment is not set up yet. Plan changes are confirmed by the platform team. Prices are provisional.</p>
+      <p className="settings-hint small pricing-note">Online payment is not set up yet. Plan changes are confirmed by the platform team. Prices are provisional.</p>
     </div>
   );
 }

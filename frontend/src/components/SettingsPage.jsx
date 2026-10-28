@@ -14,10 +14,12 @@ const PROVIDERS = {
   anthropic: {
     label: "Claude (Anthropic)", keyField: "anthropicKey", modelField: "anthropicModel", hasField: "hasAnthropicKey",
     placeholder: "sk-ant-...", modelPlaceholder: "claude-sonnet-4-6", where: "console.anthropic.com",
+    check: (k) => (k.startsWith("sk-ant-") ? null : "Claude keys start with sk-ant-. Check that you copied the whole key."),
   },
   openai: {
     label: "ChatGPT (OpenAI)", keyField: "openaiKey", modelField: "openaiModel", hasField: "hasOpenaiKey",
     placeholder: "sk-...", modelPlaceholder: "gpt-4o", where: "platform.openai.com",
+    check: (k) => (k.startsWith("sk-ant-") ? "That is a Claude key. Choose Claude (Anthropic) above, or paste an OpenAI key." : k.startsWith("sk-") ? null : "OpenAI keys start with sk-. Check that you copied the whole key."),
   },
 };
 
@@ -26,8 +28,14 @@ const PROVIDERS = {
  * (Claude or ChatGPT, bring-your-own), and account/password. Company admins also
  * get a Database tab to paste their company's database link.
  */
-export default function SettingsPage({ user, onUserUpdated }) {
-  const [tab, setTab] = useState("appearance");
+export default function SettingsPage({ user, onUserUpdated, initialTab }) {
+  const [tab, setTab] = useState(initialTab || "appearance");
+  // Other pages can open a specific tab (for example "Go to Settings, AI").
+  React.useEffect(() => {
+    const on = (e) => setTab(e.detail);
+    window.addEventListener("guut:settings-tab", on);
+    return () => window.removeEventListener("guut:settings-tab", on);
+  }, []);
   const ai = user.ai || { provider: "anthropic" };
 
   const [theme, setTheme] = useState(user.settings?.theme || "system");
@@ -62,8 +70,11 @@ export default function SettingsPage({ user, onUserUpdated }) {
     await save({ ai: { provider: next } });
   }
 
+  const keyProblem = apiKey.trim() ? P.check(apiKey.trim()) : null;
+
   async function saveKey(e) {
     e.preventDefault();
+    if (keyProblem) { setMsg({ ok: false, text: keyProblem }); return; }
     const ai = { [P.modelField]: model };
     if (apiKey.trim()) ai[P.keyField] = apiKey;
     const updated = await save({ ai }, apiKey.trim() ? "Saved." : "Model saved.");
@@ -78,8 +89,11 @@ export default function SettingsPage({ user, onUserUpdated }) {
     setBusy(true);
     setMsg(null);
     try {
-      const r = await api.testAi();
-      setMsg({ ok: true, text: `Connected. ${PROVIDERS[r.provider].label} answered using ${r.model}.` });
+      // A key typed in the box is tested before it is saved; otherwise the saved key is tested.
+      const unsaved = apiKey.trim() ? { provider, apiKey: apiKey.trim(), model } : null;
+      if (unsaved && keyProblem) { setMsg({ ok: false, text: keyProblem }); return; }
+      const r = await api.testAi(unsaved);
+      setMsg({ ok: true, text: `Connected. ${PROVIDERS[r.provider].label} answered using ${r.model}.${unsaved ? " Press Save to keep this key." : ""}` });
     } catch (err) {
       setMsg({ ok: false, text: err.message });
     } finally {
@@ -94,7 +108,7 @@ export default function SettingsPage({ user, onUserUpdated }) {
     try {
       await api.changePassword(pw.current, pw.next);
       setPw({ current: "", next: "" });
-      setMsg({ ok: true, text: "Password changed." });
+      setMsg({ ok: true, text: "Password changed. You were signed out on your other devices." });
     } catch (err) {
       setMsg({ ok: false, text: err.message });
     } finally {
@@ -147,7 +161,7 @@ export default function SettingsPage({ user, onUserUpdated }) {
           <h2>AI provider</h2>
           <p className="settings-hint">
             AI form generation and the response analysis assistant use your own API key and your own provider billing. Pick Claude or ChatGPT,
-            paste a key, and press Test. You can save both and switch any time. Without a key, your free AI credit is used (when the platform offers it). Keys are personal: nobody else in your organisation uses yours.
+            paste a key, press Test connection to check it, then Save. You can save both and switch any time. Without a key, your free AI credit is used (when the platform offers it). Keys are personal: nobody else in your organisation uses yours.
           </p>
 
           <div className="theme-options provider-options">
@@ -169,7 +183,7 @@ export default function SettingsPage({ user, onUserUpdated }) {
             <label>
               {P.label} API key
               <input
-                type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); setMsg(null); }} aria-invalid={!!keyProblem || undefined}
                 placeholder={ai[P.hasField] ? "•••••••• (saved, paste a new one to replace)" : P.placeholder} autoComplete="off"
               />
             </label>
@@ -181,12 +195,13 @@ export default function SettingsPage({ user, onUserUpdated }) {
               Get a key at <strong>{P.where}</strong>. It's encrypted before it's stored and is never shown again.
               Leave the model blank to use the default; type any model name your account can use to override it.
             </p>
+            {keyProblem && !msg && <p className="error">{keyProblem}</p>}
             {msgEl}
             <div className="api-key-actions">
-              <button className="primary" type="submit" disabled={busy || (!apiKey.trim() && model === (user.ai?.[P.modelField] || ""))}>
+              <button className="primary" type="submit" disabled={busy || !!keyProblem || (!apiKey.trim() && model === (user.ai?.[P.modelField] || ""))}>
                 {busy ? "Working..." : "Save"}
               </button>
-              <button type="button" className="secondary" disabled={busy || !ai[P.hasField]} onClick={testKey}>Test connection</button>
+              <button type="button" className="secondary" disabled={busy || !!keyProblem || (!ai[P.hasField] && !apiKey.trim())} onClick={testKey}>Test connection</button>
               {ai[P.hasField] && <button type="button" className="danger" disabled={busy} onClick={removeKey}>Remove key</button>}
             </div>
           </form>
@@ -215,6 +230,7 @@ export default function SettingsPage({ user, onUserUpdated }) {
           </dl>
 
           <h2 className="settings-subhead">Change password</h2>
+          <p className="settings-hint">Changing your password signs you out on every other device.</p>
           <form onSubmit={changePassword} className="api-key-form">
             <label>Current password
               <input type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" required />

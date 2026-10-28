@@ -10,7 +10,11 @@
     "start": "node server.js",
     "test": "node tests/main.test.mjs",
     "test:report": "node tests/report.mjs",
-    "predeploy": "npm test"
+    "predeploy": "npm test",
+    "migrate:platform-db": "node scripts/migrate-platform-db.mjs",
+    "migrate:header-images": "node scripts/migrate-header-images.mjs",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

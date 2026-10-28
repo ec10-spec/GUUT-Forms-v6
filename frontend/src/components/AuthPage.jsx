@@ -15,7 +15,13 @@ const TYPES = [
 export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
   const [mode, setMode] = useState(initial.mode || (joinCode ? "create" : "signin")); // "signin" | "create"
   const [type, setType] = useState(joinCode ? "employee" : initial.type || null); // "individual" | "business" | "employee"
-  const [f, setF] = useState({ name: "", email: "", password: "", companyName: "", plan: initial.plan || "starter", joinCode });
+  const [f, setF] = useState(() => {
+    let email = "";
+    try { email = sessionStorage.getItem("guut_auth_email") || ""; } catch { /* storage blocked */ }
+    return { name: "", email, password: "", companyName: "", plan: initial.plan || "starter", joinCode };
+  });
+  const [showPw, setShowPw] = useState(false);
+  const [ignoreJoin, setIgnoreJoin] = useState(false); // an invalid company link: continue as a normal sign-in
   const [plans, setPlans] = useState(null);
   const [joinName, setJoinName] = useState(null);
   const [joinBad, setJoinBad] = useState(false);
@@ -24,7 +30,11 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
   const [errorCode, setErrorCode] = useState(null);
   const [sentTo, setSentTo] = useState(null); // email we sent a confirmation link to
   const [resent, setResent] = useState(false);
-  const set = (patch) => setF((x) => ({ ...x, ...patch }));
+  const set = (patch) => {
+    setF((x) => ({ ...x, ...patch }));
+    // The email carries over between the Sign in and Create account tabs, and to "Forgot password".
+    if (patch.email !== undefined) { try { sessionStorage.setItem("guut_auth_email", patch.email); } catch { /* ignore */ } }
+  };
 
   useEffect(() => { api.plans().then(setPlans).catch(() => {}); }, []);
   useEffect(() => {
@@ -67,6 +77,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
 
   const creating = mode === "create";
   const chooser = creating && !type;
+  const badJoin = joinCode && joinBad && !ignoreJoin;
 
   if (sentTo) {
     return (
@@ -96,12 +107,21 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
       <div className="auth-side">
         {!joinCode && <div className="auth-hero"><h1>Describe a form. Publish it. Understand the answers.</h1><p>Build forms in minutes, share them with anyone, and turn responses into charts and plain-language insight.</p></div>}
         <div className="auth-card">
-          {joinCode && (
-            <div className="join-banner">
-              {joinBad ? <strong>This company link is not valid or is no longer accepting members.</strong> : <><span>You are invited to join</span><strong>{joinName || "..."}</strong></>}
-            </div>
+          <Logo variant="horizontal" height={30} className="auth-card-logo" />
+          {badJoin && (
+            <>
+              <div className="join-banner bad"><strong>This company link is not valid</strong><span>It may have been replaced, or the company is no longer accepting members. Ask the company admin for a new link.</span></div>
+              <div className="api-key-actions stack">
+                <button className="primary" type="button" onClick={() => { setIgnoreJoin(true); go("signin"); }}>Sign in</button>
+                <button className="secondary" type="button" onClick={() => { setIgnoreJoin(true); go("create", "individual"); }}>Create an individual account</button>
+              </div>
+            </>
+          )}
+          {joinCode && !joinBad && (
+            <div className="join-banner"><span>You are invited to join</span><strong>{joinName || "..."}</strong></div>
           )}
 
+          {!badJoin && <>
           <div className="settings-tabs auth-doors">
             <button type="button" className={!creating ? "active" : ""} onClick={() => go("signin")}>Sign in</button>
             <button type="button" className={creating ? "active" : ""} onClick={() => go("create")}>Create account</button>
@@ -109,8 +129,8 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
 
           {!creating && (
             <>
-              <h2 className="auth-title">Sign in</h2>
-              
+              <h2 className="auth-title spaced">Welcome back</h2>
+              <p className="auth-sub">Sign in with your email and password.</p>
             </>
           )}
 
@@ -133,7 +153,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
               {creating && (
                 <>
                   <h2 className="auth-title">{type === "employee" ? (joinName ? `Join ${joinName}` : "Join your company") : `${TYPES.find((t) => t[0] === type)[1]} account`}</h2>
-                  {!joinCode && <button type="button" className="link-btn align-left" onClick={() => go("create")}>Change account type</button>}
+                  {(!joinCode || ignoreJoin) && <button type="button" className="link-btn align-left" onClick={() => go("create")}>Change account type</button>}
                   <label>Your name
                     <input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder="Your name" autoComplete="name" />
                   </label>
@@ -151,7 +171,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
                       </label>
                     </>
                   )}
-                  {type === "employee" && !joinCode && (
+                  {type === "employee" && (!joinCode || ignoreJoin) && (
                     <label>Company code
                       <input value={f.joinCode} onChange={(e) => set({ joinCode: e.target.value })} placeholder="ABCD-EFGH" autoComplete="off" required />
                       <span className="field-help">Ask your company admin. They approve your account before you can use the company's forms.</span>
@@ -163,11 +183,15 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
                 <input type="email" value={f.email} onChange={(e) => set({ email: e.target.value })} placeholder="you@company.com" autoComplete="email" required />
               </label>
               <label>Password
-                <input
-                  type="password" value={f.password} onChange={(e) => set({ password: e.target.value })}
-                  placeholder={creating ? "At least 8 characters" : "Your password"} autoComplete={creating ? "new-password" : "current-password"} minLength={creating ? 8 : undefined} required
-                />
+                <span className="password-row">
+                  <input
+                    type={showPw ? "text" : "password"} value={f.password} onChange={(e) => set({ password: e.target.value })}
+                    placeholder={creating ? "At least 8 characters" : "Your password"} autoComplete={creating ? "new-password" : "current-password"} minLength={creating ? 8 : undefined} required
+                  />
+                  <button type="button" className="link-btn show-pw" onClick={() => setShowPw((v) => !v)} aria-pressed={showPw} aria-label={showPw ? "Hide password" : "Show password"}>{showPw ? "Hide" : "Show"}</button>
+                </span>
               </label>
+              {!creating && <a className="link-btn align-left forgot-link" href="#/forgot">Forgot password?</a>}
 
               {error && <p className="error">{error}</p>}
               {errorCode === "EMAIL_NOT_VERIFIED" && (
@@ -179,6 +203,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
               </button>
             </form>
           )}
+          </>}
         </div>
 
       </div>

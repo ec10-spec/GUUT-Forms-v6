@@ -85,7 +85,7 @@ router.put("/users/:id", async (req, res) => {
   if (active !== undefined) user.active = !!active;
   if (newPassword !== undefined) {
     if (typeof newPassword !== "string" || newPassword.length < 8) throw httpError(400, "Password must be at least 8 characters.");
-    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.setPasswordHash(await bcrypt.hash(newPassword, 10));
   }
   await user.save();
   logger.info("admin", `Team member updated: ${user.email}`, { req });

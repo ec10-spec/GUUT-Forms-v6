@@ -24,7 +24,8 @@ export default function TeamsPage({ user }) {
   }
 
   return (
-    <div className="teams-page">
+    <div className="admin-page teams-page">
+      <span className="hero-eyebrow"><span className="dot" /> Sharing</span>
       <h1>Teams</h1>
       <p className="settings-hint">
         {business

@@ -70,5 +70,14 @@
     "failures": [],
     "node": "v22.22.0",
     "commit": null
+  },
+  {
+    "at": "2026-10-28T04:15:50.093Z",
+    "passed": 161,
+    "failed": 0,
+    "failures": [],
+    "node": "v22.23.4",
+    "commit": null,
+    "note": "QA round, run against FerretDB 1.24 (TEST_MONGO_URI)"
   }
 ]

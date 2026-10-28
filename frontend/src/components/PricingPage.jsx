@@ -2,10 +2,13 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
 
 /** Plan cards. Used on the public Pricing page; prices are placeholders until billing is switched on. */
-export default function PricingPage({ onChoose }) {
+export default function PricingPage({ onChoose, user }) {
   const [plans, setPlans] = useState(null);
   useEffect(() => { api.plans().then(setPlans).catch(() => {}); }, []);
   if (!plans) return <p className="muted">Loading plans...</p>;
+  // Signed-in accounts see which plan they already have instead of a sign-up button for it.
+  const myPlan = user?.company?.type === "business" ? user.company.plan || "starter" : user?.company?.type === "individual" ? "individual" : null;
+  const isAdmin = user?.role === "admin";
   return (
     <div className="pricing-page">
       <h1>Pricing</h1>
@@ -16,7 +19,9 @@ export default function PricingPage({ onChoose }) {
           <div className="price">{plans.individual.priceLabel}</div>
           <p className="price-tag-line">{plans.individual.tagline}</p>
           <ul>{plans.individual.features.map((x) => <li key={x}>{x}</li>)}</ul>
-          <button className="primary" onClick={() => onChoose("individual")}>Start free</button>
+          <div className="price-card-foot">
+            {myPlan === "individual" ? <span className="access-badge">Current plan</span> : !user ? <button className="primary" onClick={() => onChoose("individual")}>Start free</button> : null}
+          </div>
         </div>
         {plans.business.map((p) => (
           <div key={p.id} className="price-card">
@@ -24,7 +29,12 @@ export default function PricingPage({ onChoose }) {
             <div className="price">{p.priceLabel}</div>
             <p className="price-tag-line">Business</p>
             <ul>{p.features.map((x) => <li key={x}>{x}</li>)}</ul>
-            <button className="secondary" onClick={() => onChoose("business", p.id)}>Choose {p.name}</button>
+            <div className="price-card-foot">
+              {myPlan === p.id ? <span className="access-badge">Current plan</span>
+                : !user ? <button className="secondary" onClick={() => onChoose("business", p.id)}>Choose {p.name}</button>
+                : myPlan && myPlan !== "individual" && isAdmin ? <button className="secondary" onClick={() => onChoose("business", p.id)}>Change in Admin, Billing</button>
+                : null}
+            </div>
           </div>
         ))}
       </div>

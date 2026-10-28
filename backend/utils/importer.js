@@ -1,5 +1,6 @@
 import XLSX from "xlsx";
 import { httpError } from "./http.js";
+import { validateValue, visibleFieldIds, isEmpty } from "./answers.js";
 
 // Importing older responses from a CSV or Excel file. Each column is matched to one of the form's fields
 // and every value is converted to the shape the form itself stores, so imported rows look exactly like
@@ -53,58 +54,58 @@ export function suggestMapping(headers, fields) {
 }
 
 const TRUE = /^(1|true|yes|y|checked|x)$/i;
-function toDate(v) {
+/** Reads the date formats people put in spreadsheets: ISO, M/D/YYYY, and anything Date can parse. */
+export function toDate(v) {
   if (!v) return null;
   const s = String(v).trim();
-  const d = /^\d{4}-\d{2}-\d{2}/.test(s) ? new Date(s) : new Date(s.replace(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/, (_, a, b, c) => `${c.length === 2 ? "20" + c : c}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`));
+  if (!s) return null;
+  // A date with no time is stored at noon UTC, so it shows as the same calendar day in every time zone.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const d = new Date(`${s}T12:00:00Z`); return Number.isNaN(d.getTime()) ? null : d; }
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(.*)$/);
+  if (us) {
+    const [, a, b, c, rest] = us;
+    const iso = `${c.length === 2 ? "20" + c : c}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`;
+    const d = rest.trim() ? new Date(`${iso} ${rest.trim()}`) : new Date(`${iso}T12:00:00Z`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 const matchOption = (value, options) => options.find((o) => norm(o) === norm(value)) ?? null;
 
-/** Converts one raw cell to the stored value for a field. Returns { value, issue } (issue = a short note or null). */
+/**
+ * Converts one raw cell to the stored value for a field, then runs the same validator live submissions use.
+ * Spreadsheet leniency (currency signs, "4 stars", case-insensitive options, M/D/YYYY dates) happens here;
+ * anything still invalid is left blank and reported. Returns { value, issue }.
+ */
 export function cleanValue(field, raw) {
-  const s = String(raw ?? "").trim();
-  if (!s) return { value: "", issue: null };
+  let s = String(raw ?? "").trim();
+  if (!s) return { value: field.type === "checkbox" ? [] : "", issue: null };
+  let candidate = s;
   switch (field.type) {
-    case "number": {
-      const n = Number(s.replace(/[,$\s]/g, "").replace(/%$/, ""));
-      return Number.isFinite(n) ? { value: n, issue: null } : { value: "", issue: `"${s.slice(0, 30)}" is not a number` };
-    }
-    case "rating": {
-      const n = Math.round(Number(s.replace(/[^\d.]/g, "")));
-      return n >= 1 && n <= 5 ? { value: n, issue: null } : { value: "", issue: `"${s.slice(0, 30)}" is not a 1 to 5 rating` };
-    }
-    case "email":
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? { value: s.toLowerCase(), issue: null } : { value: "", issue: `"${s.slice(0, 30)}" is not an email` };
-    case "date": {
-      const d = toDate(s);
-      return d ? { value: d.toISOString().slice(0, 10), issue: null } : { value: "", issue: `"${s.slice(0, 30)}" is not a date` };
-    }
-    case "select": {
-      const hit = matchOption(s, field.options || []);
-      return hit ? { value: hit, issue: null } : { value: s.slice(0, 1000), issue: `"${s.slice(0, 30)}" is not one of the options` };
-    }
+    case "number": candidate = s.replace(/[,$\s]/g, "").replace(/%$/, ""); break;
+    case "rating": { const m = s.match(/^\s*(\d+(?:\.0+)?)\s*(?:\/\s*5|stars?|out of 5)?\s*$/i); candidate = m ? m[1] : s; break; }
+    case "date": { const d = toDate(s); candidate = d ? d.toISOString().slice(0, 10) : s; break; }
+    case "select": candidate = matchOption(s, field.options || []) ?? s; break;
     case "checkbox": {
       const parts = s.split(/[;,|\n]/).map((x) => x.trim()).filter(Boolean);
-      if ((field.options || []).length === 0 && parts.length <= 1 && TRUE.test(s)) return { value: [field.label], issue: null };
-      let issue = null;
-      const out = parts.slice(0, 100).map((p) => {
-        const hit = matchOption(p, field.options || []);
-        if (!hit && !issue) issue = `"${p.slice(0, 30)}" is not one of the options`;
-        return hit ?? p.slice(0, 1000);
-      });
-      return { value: [...new Set(out)], issue };
+      if ((field.options || []).length === 1 && parts.length <= 1 && TRUE.test(s)) candidate = [field.options[0]];
+      else candidate = parts.map((p) => matchOption(p, field.options || []) ?? p);
+      break;
     }
-    case "file":
-      return { value: "", issue: null };
-    default:
-      return { value: s.slice(0, 10000), issue: null };
+    case "file": return { value: "", issue: null }; // files can't be imported from a spreadsheet
+    default: break;
   }
+  const { value, error } = validateValue(field, candidate);
+  return error ? { value: field.type === "checkbox" ? [] : "", issue: `"${s.slice(0, 30)}" ${error}, left blank` } : { value, issue: null };
 }
 
 /**
  * Applies a mapping ({ fieldId: headerName }) to every row.
- * Returns { answers, createdAt, issues:[{row,message}], skipped } per row set; rows with nothing mapped are skipped.
+ * A cell that fails validation is left blank (with a note). A row is skipped (with a note) when nothing in it
+ * maps to a field, or when a required question that was shown has no valid answer. A timestamp that can't
+ * be read falls back to the import time and is flagged.
+ * Returns { rows:[{answers, createdAt}], issues:[{row, field, message}], skipped, skippedEmpty, skippedMissing, badTimestamps }.
  */
 export function cleanRows({ fields, headers, rows, mapping, timestampColumn }) {
   const col = (name) => (name ? headers.indexOf(name) : -1);
@@ -113,20 +114,36 @@ export function cleanRows({ fields, headers, rows, mapping, timestampColumn }) {
   const tsI = col(timestampColumn);
   const out = [];
   const issues = [];
-  let skipped = 0;
+  let skippedEmpty = 0, skippedMissing = 0, badTimestamps = 0;
   rows.forEach((row, n) => {
+    const rowNo = n + 2;
     const answers = {};
+    const rowIssues = [];
     let any = false;
     for (const f of fields) answers[f.id] = f.type === "checkbox" ? [] : "";
     for (const { f, i } of plan) {
+      if (String(row[i] ?? "").trim()) any = true;
       const { value, issue } = cleanValue(f, row[i]);
       answers[f.id] = value;
-      if (value !== "" && !(Array.isArray(value) && !value.length)) any = true;
-      if (issue) issues.push({ row: n + 2, field: f.label, message: issue });
+      if (issue) rowIssues.push({ row: rowNo, field: f.label, message: issue });
     }
-    if (!any) { skipped++; return; }
-    const createdAt = tsI >= 0 ? toDate(row[tsI]) : null;
+    if (!any) { skippedEmpty++; return; }
+    const visible = visibleFieldIds(fields, answers);
+    for (const f of fields) if (!visible.has(f.id)) answers[f.id] = f.type === "checkbox" ? [] : "";
+    const missing = fields.filter((f) => f.required && f.type !== "file" && visible.has(f.id) && isEmpty(answers[f.id]));
+    if (missing.length) {
+      skippedMissing++;
+      issues.push(...rowIssues, { row: rowNo, field: missing.map((f) => f.label).join(", "), message: `Row skipped: required answer${missing.length > 1 ? "s" : ""} missing or invalid` });
+      return;
+    }
+    issues.push(...rowIssues);
+    let createdAt = null;
+    if (tsI >= 0) {
+      const rawTs = String(row[tsI] ?? "").trim();
+      createdAt = toDate(rawTs);
+      if (rawTs && !createdAt) { badTimestamps++; issues.push({ row: rowNo, field: timestampColumn, message: `"${rawTs.slice(0, 30)}" is not a date, so the import time was used` }); }
+    }
     out.push({ answers, createdAt });
   });
-  return { rows: out, issues, skipped };
+  return { rows: out, issues, skipped: skippedEmpty + skippedMissing, skippedEmpty, skippedMissing, badTimestamps };
 }

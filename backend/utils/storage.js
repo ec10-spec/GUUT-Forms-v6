@@ -4,6 +4,7 @@ import FormIndex from "../models/FormIndex.js";
 import { getTenant } from "../config/db.js";
 import { httpError } from "./http.js";
 import { INDIVIDUAL, planById, billingEnforced } from "./plans.js";
+import { fileBytesByForm } from "./uploads.js";
 
 // ---------------------------------------------------------------------------
 // STORAGE TRACKING. Each form and response stores its own approximate size
@@ -37,7 +38,7 @@ export function storageLimitBytes(company) {
 }
 
 export const bumpStorage = async (companyId, delta) => {
-  if (delta) await Company.updateOne({ _id: companyId }, { $inc: { "storage.bytes": Math.round(delta) } });
+  if (delta) await Company.updateOne({ _id: companyId }, { $inc: { "storage.bytes": Math.round(delta) }, $set: { "storage.updatedAt": new Date() } });
 };
 
 const chunks = (arr, n = 50) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
@@ -63,10 +64,11 @@ export async function recalculateStorage(company) {
       if (batch.length >= 500) { await tenant.Submission.bulkWrite(batch); batch = []; }
     }
     if (batch.length) await tenant.Submission.bulkWrite(batch);
+    for (const b of (await fileBytesByForm(tenant, chunk)).values()) total += b; // uploaded files and header images
   }
   const verifiedAt = new Date();
-  await Company.updateOne({ _id: company._id }, { $set: { "storage.bytes": total, "storage.verifiedAt": verifiedAt } });
-  company.storage = { bytes: total, verifiedAt };
+  await Company.updateOne({ _id: company._id }, { $set: { "storage.bytes": total, "storage.verifiedAt": verifiedAt, "storage.updatedAt": verifiedAt } });
+  company.storage = { bytes: total, verifiedAt, updatedAt: verifiedAt };
   return total;
 }
 
@@ -101,6 +103,10 @@ export async function formStats(tenant, formIds) {
     for (const r of agg) {
       const row = out.get(String(r._id));
       if (row) row.bytes += r.bytes || 0;
+    }
+    for (const [id, b] of await fileBytesByForm(tenant, chunk)) {
+      const row = out.get(String(id));
+      if (row) row.bytes += b;
     }
     await Promise.all(chunk.map(async (id) => {
       const row = out.get(String(id));

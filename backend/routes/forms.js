@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import mongoose from "mongoose";
 import FormIndex, { syncIndex } from "../models/FormIndex.js";
 import User from "../models/User.js";
@@ -10,13 +10,22 @@ import Company from "../models/Company.js";
 import { assertStorageRoom, bumpStorage, formSize, formStats, recordFormSize } from "../utils/storage.js";
 import { httpError, escapeRegex } from "../utils/http.js";
 import { logger } from "../utils/logger.js";
+import { sanitizeFields, sanitizeTheme, publicView } from "../utils/formRules.js";
+import { MAX_HEADER_BYTES, sniffOk, writeFile, findFile, streamFile, deleteFiles, bucket, oid } from "../utils/uploads.js";
 
 const router = Router();
 
 // Only these keys can be set by a client. Everything else (ownerId,
 // publishedAt, ...) is controlled by the server.
 const EDITABLE = ["title", "description", "fields", "theme", "isPublic", "source", "generationPrompt"];
-const pick = (body) => Object.fromEntries(EDITABLE.filter((k) => body?.[k] !== undefined).map((k) => [k, body[k]]));
+const pickRaw = (body) => Object.fromEntries(EDITABLE.filter((k) => body?.[k] !== undefined).map((k) => [k, body[k]]));
+/** Client-editable keys, with the questions' logic and the theme checked. */
+function pick(body, { formId = null, previousTheme = null } = {}) {
+  const out = pickRaw(body);
+  if (out.fields !== undefined) out.fields = sanitizeFields(out.fields);
+  if (out.theme !== undefined) out.theme = sanitizeTheme(out.theme, { formId, previous: previousTheme?.headerImage ?? null });
+  return out;
+}
 
 // Finds a form's directory entry and the database it lives in.
 async function locate(id, opts) {
@@ -40,8 +49,9 @@ const withAccess = (doc, access) => ({ ...(doc.toObject ? doc.toObject() : doc),
 // Create a form in the caller's company database.
 router.post("/", requireAuth, withTenant, async (req, res) => {
   await assertCanCreateForm(req.company, req.tenant, req.userId, FormIndex);
-  await assertStorageRoom(req.company, formSize(pick(req.body)));
-  const form = await req.tenant.Form.create({ ...pick(req.body), ownerId: req.userId, publishedAt: null });
+  const body = pick(req.body);
+  await assertStorageRoom(req.company, formSize(body));
+  const form = await req.tenant.Form.create({ ...body, ownerId: req.userId, publishedAt: null });
   try {
     await syncIndex(form, req.user.companyId);
   } catch (err) {
@@ -129,15 +139,16 @@ router.get("/:id", async (req, res) => {
   const out = form.toObject();
   // Paid (business) plans remove the "Made with GUUT Forms" footer from their public forms.
   out.hideBranding = (await Company.findById(peek?.companyId || undefined).select("type").lean())?.type === "business";
-  if (mine) { out.myAccess = access; out.listingStatus = peek?.listing?.status || "none"; }
-  else delete out.ownerId;
-  res.json(out);
+  if (mine) { out.myAccess = access; out.listingStatus = peek?.listing?.status || "none"; return res.json(out); }
+  // Respondents get only what they need to fill the form in: no owner, prompt or internal fields.
+  res.json(publicView(out));
 });
 
 router.put("/:id", requireAuth, async (req, res) => {
   const { idx, tenant } = await locate(req.params.id);
   const access = assertAccess(req, idx, canEdit, "You have view-only access to this form.");
-  const body = pick(req.body);
+  const current = await tenant.Form.findById(req.params.id).select("theme").lean();
+  const body = pick(req.body, { formId: req.params.id, previousTheme: current?.theme });
   const company = await Company.findById(idx.companyId);
   // Listing a form in the public repository is the owner's/admin's call, not an editor's.
   if (body.isPublic !== undefined && !!body.isPublic !== !!idx.isPublic && !canManage(access)) {
@@ -194,8 +205,19 @@ router.post("/:id/duplicate", requireAuth, withTenant, async (req, res) => {
   await assertStorageRoom(req.company, formSize(plain));
   const copy = await req.tenant.Form.create({
     title: `${plain.title} (copy)`, description: plain.description, ownerId: req.userId,
-    fields: plain.fields, theme: plain.theme, source: "manual", generationPrompt: null, isPublic: false, publishedAt: null,
+    fields: plain.fields, theme: { ...plain.theme, headerImage: null }, source: "manual", generationPrompt: null, isPublic: false, publishedAt: null,
   });
+  // The header image belongs to the source form, so the copy gets its own copy of the file.
+  const m = /\/header-image\/([a-f\d]{24})$/i.exec(plain.theme?.headerImage || "");
+  const asset = m ? await findFile(sourceTenant, "assets", m[1]) : null;
+  if (asset && asset.metadata?.formId === String(source._id)) {
+    const chunks = [];
+    await new Promise((resolve, reject) => bucket(sourceTenant, "assets").openDownloadStream(asset._id).on("data", (c) => chunks.push(c)).on("error", reject).on("end", resolve));
+    const newId = await writeFile(req.tenant, "assets", { filename: asset.filename, contentType: asset.contentType, buffer: Buffer.concat(chunks), metadata: { formId: String(copy._id), kind: "header", contentType: asset.contentType } });
+    copy.theme.headerImage = `/api/forms/${copy._id}/header-image/${newId}`;
+    await copy.save();
+    await bumpStorage(req.user.companyId, asset.length);
+  }
   await syncIndex(copy, req.user.companyId);
   await recordFormSize(req.tenant, req.user.companyId, copy);
   notifyFormCreated({ form: copy, companyId: req.user.companyId, creator: req.user });
@@ -208,10 +230,67 @@ router.delete("/:id", requireAuth, async (req, res) => {
   const freed = (await formStats(tenant, [idx._id])).get(String(idx._id))?.bytes || 0;
   await tenant.Form.findByIdAndDelete(req.params.id);
   await tenant.Submission.deleteMany({ formId: req.params.id });
+  await tenant.AnalysisChat.deleteMany({ formId: req.params.id }).catch(() => {});
+  for (const b of ["uploads", "assets"]) await deleteFiles(tenant, b, { "metadata.formId": String(req.params.id) }).catch(() => {});
   await bumpStorage(idx.companyId, -freed);
   await idx.deleteOne();
   logger.info("form", `Form deleted: ${idx.title}`, { req, meta: { formId: req.params.id } });
   res.status(204).end();
+});
+
+// ---- Header images. Stored as files next to the form (not inside it) and served by URL, so a public form
+// loads a few KB of JSON instead of an embedded image. The builder resizes to 1600px wide and compresses
+// before uploading; the server enforces the type and a 2 MB cap.
+const HEADER_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const rawImage = express.raw({ type: () => true, limit: "3mb" });
+
+router.post("/:id/header-image", requireAuth, rawImage, async (req, res) => {
+  const { idx, tenant } = await locate(req.params.id);
+  const access = assertAccess(req, idx, canEdit, "You have view-only access to this form.");
+  const type = String(req.header("content-type") || "").split(";")[0].trim().toLowerCase();
+  const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  if (!HEADER_TYPES.has(type)) throw httpError(400, "Header images must be JPEG, PNG or WebP.", { code: "FILE_TYPE" });
+  if (!buffer.length) throw httpError(400, "That image is empty.");
+  if (buffer.length > MAX_HEADER_BYTES) throw httpError(413, "That image is larger than 2 MB. Use a smaller image (1600 x 400 works best).", { code: "FILE_TOO_LARGE" });
+  if (!sniffOk(type, buffer)) throw httpError(400, "That file isn't a valid image.", { code: "FILE_TYPE" });
+  const company = await Company.findById(idx.companyId);
+  await assertStorageRoom(company, buffer.length);
+  const form = await tenant.Form.findById(idx._id);
+  if (!form) throw httpError(404, "Form not found");
+  const id = await writeFile(tenant, "assets", { filename: `header-${idx._id}`, contentType: type, buffer, metadata: { formId: String(idx._id), kind: "header", contentType: type } });
+  // Replace: remove older header files for this form.
+  const { bytes } = await deleteFiles(tenant, "assets", { "metadata.formId": String(idx._id), "metadata.kind": "header", _id: { $ne: id } });
+  const before = form.sizeBytes || 0;
+  form.theme.headerImage = `/api/forms/${idx._id}/header-image/${id}`;
+  await form.save();
+  await syncIndex(form, idx.companyId);
+  await recordFormSize(tenant, idx.companyId, form, before);
+  await bumpStorage(idx.companyId, buffer.length - bytes);
+  res.status(201).json({ headerImage: form.theme.headerImage, bytes: buffer.length, form: withAccess(form, access) });
+});
+
+router.delete("/:id/header-image", requireAuth, async (req, res) => {
+  const { idx, tenant } = await locate(req.params.id);
+  const access = assertAccess(req, idx, canEdit, "You have view-only access to this form.");
+  const form = await tenant.Form.findById(idx._id);
+  if (!form) throw httpError(404, "Form not found");
+  const { bytes } = await deleteFiles(tenant, "assets", { "metadata.formId": String(idx._id), "metadata.kind": "header" });
+  const before = form.sizeBytes || 0;
+  form.theme.headerImage = null;
+  await form.save();
+  await recordFormSize(tenant, idx.companyId, form, before);
+  await bumpStorage(idx.companyId, -bytes);
+  res.json({ headerImage: null, form: withAccess(form, access) });
+});
+
+// Public: the image itself. The id changes on every upload, so it can be cached for a long time.
+router.get("/:id/header-image/:assetId", async (req, res) => {
+  const { idx, tenant } = await locate(req.params.id, { publicFacing: true });
+  const file = await findFile(tenant, "assets", req.params.assetId);
+  if (!file || file.metadata?.formId !== String(idx._id)) throw httpError(404, "Image not found");
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  await streamFile(tenant, "assets", file, res);
 });
 
 export default router;

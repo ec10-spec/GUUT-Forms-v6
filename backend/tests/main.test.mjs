@@ -1,5 +1,5 @@
 // Full backend regression suite. Run: npm test (from backend/)
-import { check, suite, counts, startServer, testMongo, startSmtpSink, tokenFromMail, account, form } from "./helpers.mjs";
+import { check, suite, counts, startServer, testMongo, startSmtpSink, tokenFromMail, decodeQP, account, form } from "./helpers.mjs";
 import fs from "fs";
 
 const stamp = Date.now().toString(36);
@@ -198,6 +198,135 @@ try {
   check("no key and no platform key asks for a key", gen.status === 400 && gen.body.code === "NO_API_KEY", gen.body);
   const bud = await api("GET", "/ai/budget", undefined, ind.token);
   check("budget reports credit unavailable without platform key", bud.status === 200 && bud.body.credit?.available === false, bud.body);
+
+  suite("QA round: answer validation (P0-4)");
+  const strip = (t) => t.split("\n").filter((l) => !l.startsWith("// Copy of backend") && !l.startsWith("// server enforces")).join("\n").trim();
+  const beRules = fs.readFileSync(new URL("../utils/answers.js", import.meta.url), "utf8");
+  const feRulesUrl = new URL("../../frontend/src/lib/answers.js", import.meta.url);
+  check("form page uses the same validator as the server", !fs.existsSync(feRulesUrl) || strip(fs.readFileSync(feRulesUrl, "utf8")) === strip(beRules));
+  const qa = await account(api, { type: "individual", email: "qa@x.co", password: pw, name: "Quinn" });
+  const qaFields = [
+    { id: "name", type: "text", label: "Your name", required: true, order: 0 },
+    { id: "email", type: "email", label: "Email", required: true, order: 1 },
+    { id: "rate", type: "rating", label: "Coffee rating", required: true, order: 2 },
+    { id: "freq", type: "select", label: "How often", options: ["Daily", "Weekly"], order: 3 },
+    { id: "drinks", type: "checkbox", label: "Drinks", options: ["Latte", "Mocha"], order: 4 },
+    { id: "when", type: "date", label: "Visit date", order: 5 },
+    { id: "why", type: "textarea", label: "What went wrong", order: 6, showIf: { fieldId: "rate", op: "lte", values: ["2"] } },
+    { id: "cups", type: "number", label: "Cups", order: 7 },
+  ];
+  const qf = await api("POST", "/forms", { title: "QA coffee", fields: qaFields, generationPrompt: "secret prompt", source: "ai_generated" }, qa.token);
+  check("form with rating condition saves", qf.status === 201, qf.body);
+  const qid = qf.body._id;
+  await api("POST", `/forms/${qid}/publish`, {}, qa.token);
+  const good = { name: "Priya", email: "p@x.co", rate: 4, freq: "Daily", drinks: ["Latte"], when: "2026-10-27", cups: "2" };
+  const sub = (a) => api("POST", `/submissions/${qid}`, { answers: a });
+  check("valid submission accepted", (await sub(good)).status === 201);
+  for (const [label, patch] of [["rating 9", { rate: 9 }], ["rating -3", { rate: -3 }], ["rating five", { rate: "five" }], ["select not an option", { freq: "Every second Tuesday" }],
+    ["checkbox not an option", { drinks: ["Whiskey"] }], ["bad email", { email: "not-an-email" }], ["email of spaces", { email: "   " }], ["name of spaces", { name: "   " }],
+    ["10,000 character name", { name: "x".repeat(10000) }], ["bad date", { when: "not a date" }], ["number text", { cups: "lots" }]]) {
+    const r = await sub({ ...good, ...patch });
+    check(`rejects ${label}`, r.status === 400 && r.body?.code === "INVALID_ANSWERS", r.body);
+  }
+  const hidden = await sub({ ...good, rate: 5, why: "should be dropped" });
+  check("answer to a hidden question accepted but dropped", hidden.status === 201);
+  const shown = await sub({ ...good, rate: 1, why: "  lukewarm  " });
+  check("conditional question shown by rating <= 2", shown.status === 201);
+  const qsubs = (await api("GET", `/submissions/${qid}`, undefined, qa.token)).body;
+  check("hidden answer not stored, shown answer trimmed", qsubs.every((x) => x.answers.why !== "should be dropped") && qsubs.some((x) => x.answers.why === "lukewarm"), qsubs.map((x) => x.answers.why));
+  check("rating stored as a number", qsubs.every((x) => typeof x.answers.rate === "number"));
+
+  suite("QA round: analytics and dates (P0-5, P1-9, P1-10)");
+  const sum = await api("GET", `/analysis/${qid}/summary?tz=America/Los_Angeles`, undefined, qa.token);
+  const why = sum.body.fields?.find((x) => x.id === "why");
+  check("conditional answer rate counts only responses that showed it", why?.shown === 1 && why?.answerRate === 100, why);
+  const rateF = sum.body.fields?.find((x) => x.id === "rate");
+  check("rating count matches its bars", rateF.answered === rateF.distribution.reduce((a, b) => a + b.count, 0), rateF);
+  check("name field has no word counts", !sum.body.fields.find((x) => x.id === "name").topWords);
+  check("timeline is zero-filled with a unit", sum.body.timeline?.unit === "day" && Array.isArray(sum.body.timeline.points));
+  const csvTz = Buffer.from("Submitted,Your name,Email,Coffee rating\n2026-10-28T03:10:00Z,Lee,l@x.co,3\n2025-06-01,Sam,s@x.co,4\n").toString("base64");
+  const impTz = await api("POST", `/submissions/${qid}/import`, { base64: csvTz, filename: "tz.csv", mapping: { name: "Your name", email: "Email", rate: "Coffee rating" }, timestampColumn: "Submitted" }, qa.token);
+  check("import with timestamps", impTz.status === 201 && impTz.body.imported === 2, impTz.body);
+  const sum2 = await api("GET", `/analysis/${qid}/summary?tz=America/Los_Angeles`, undefined, qa.token);
+  check("8:10 PM Pacific counts on that Pacific day", sum2.body.perDay.some((d) => d.date === "2026-10-27"), sum2.body.perDay);
+  check("date-only import keeps its calendar day", sum2.body.firstDay === "2025-06-01", sum2.body.firstDay);
+  check("long span groups by month", sum2.body.timeline.unit === "month", sum2.body.timeline.unit);
+  const csvRes = await fetch(`${S.base}/api/submissions/${qid}/export.csv?tz=America/Los_Angeles`, { headers: { Authorization: `Bearer ${qa.token}` } });
+  check("CSV has a local-time column", (await csvRes.text()).startsWith("Submitted (America/Los_Angeles),Submitted (UTC)"));
+
+  suite("QA round: import checks (P1-12)");
+  const badCsv = Buffer.from("Your name,Email,Coffee rating,How often,Submitted\nAna,a@x.co,4,Weekly-ish,not a date\n,,,,\nBo,,,,2026-01-01\nCy,c@x.co,9,Daily,2026-01-02\n").toString("base64");
+  const chk = await api("POST", `/submissions/${qid}/import`, { base64: badCsv, filename: "bad.csv", mapping: { name: "Your name", email: "Email", rate: "Coffee rating", freq: "How often" }, timestampColumn: "Submitted", dryRun: true }, qa.token);
+  check("invalid option blanked, bad timestamp flagged", chk.body.importable === 1 && chk.body.badTimestamps === 1 && chk.body.issues.some((i) => /not one of the options/.test(i.message)), chk.body);
+  check("rows missing required answers are skipped and counted", chk.body.skippedMissing === 2 && chk.body.skippedEmpty === 0, chk.body);
+
+  suite("QA round: public form and design (P1-15, 16, 18)");
+  const pub = await api("GET", `/forms/${qid}`);
+  check("public form hides prompt, source and owner", pub.status === 200 && pub.body.generationPrompt === undefined && pub.body.source === undefined && pub.body.ownerId === undefined, Object.keys(pub.body));
+  check("owner still sees the prompt", (await api("GET", `/forms/${qid}`, undefined, qa.token)).body.generationPrompt === "secret prompt");
+  check("colour must be hex", (await api("PUT", `/forms/${qid}`, { theme: { primaryColor: "notacolor" } }, qa.token)).status === 400);
+  check("embedded base64 header image rejected", (await api("PUT", `/forms/${qid}`, { theme: { primaryColor: "#001549", headerImage: "data:image/png;base64,AAAA" } }, qa.token)).body?.code === "BAD_HEADER_IMAGE");
+  const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000" + "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082", "hex");
+  const up = await fetch(`${S.base}/api/forms/${qid}/header-image`, { method: "POST", headers: { "Content-Type": "image/png", Authorization: `Bearer ${qa.token}` }, body: png });
+  const upB = await up.json();
+  check("header image uploads and is stored as a URL", up.status === 201 && /^\/api\/forms\/[a-f\d]{24}\/header-image\/[a-f\d]{24}$/.test(upB.headerImage), upB);
+  const img = await fetch(`${S.base}${upB.headerImage}`);
+  check("header image served publicly", img.status === 200 && img.headers.get("content-type") === "image/png");
+  check("saving the form keeps the uploaded image", (await api("PUT", `/forms/${qid}`, { theme: { primaryColor: "#001549", backgroundColor: "#fff8ee", headerImage: upB.headerImage } }, qa.token)).status === 200);
+  const fake = await fetch(`${S.base}/api/forms/${qid}/header-image`, { method: "POST", headers: { "Content-Type": "image/png", Authorization: `Bearer ${qa.token}` }, body: Buffer.from("not an image") });
+  check("non-image header rejected", fake.status === 400);
+  check("logic on a text question rejected", (await api("PUT", `/forms/${qid}`, { fields: [qaFields[0], { ...qaFields[6], showIf: { fieldId: "name", op: "eq", values: ["x"] } }] }, qa.token)).status === 400);
+
+  suite("QA round: file uploads (P0-1)");
+  const ff = await api("POST", "/forms", { title: "Receipts", fields: [{ id: "who", type: "text", label: "Name", order: 0 }, { id: "receipt", type: "file", label: "Receipt", required: true, order: 1, accept: ["image"], maxSizeMb: 2 }] }, qa.token);
+  const ffid = ff.body._id;
+  await api("POST", `/forms/${ffid}/publish`, {}, qa.token);
+  check("fake file path string rejected", (await api("POST", `/submissions/${ffid}`, { answers: { who: "Al", receipt: "C:\\fakepath\\malware.exe" } })).status === 400);
+  const upl = (type, body) => fetch(`${S.base}/api/uploads/${ffid}/receipt`, { method: "POST", headers: { "Content-Type": type, "X-Filename": encodeURIComponent("receipt.png") }, body });
+  const badType = await upl("text/plain", Buffer.from("hello"));
+  check("file type not allowed for the question", badType.status === 400);
+  const disguised = await upl("image/png", Buffer.from("MZ not really a png"));
+  check("disguised file rejected", disguised.status === 400);
+  const fr = await upl("image/png", png);
+  const frB = await fr.json();
+  check("respondent uploads a file", fr.status === 201 && !!frB.fileId, frB);
+  check("submission with the uploaded file", (await api("POST", `/submissions/${ffid}`, { answers: { who: "Al", receipt: frB } })).status === 201);
+  check("same file can't be attached twice", (await api("POST", `/submissions/${ffid}`, { answers: { who: "Al", receipt: frB } })).status === 400);
+  const fsubs = (await api("GET", `/submissions/${ffid}`, undefined, qa.token)).body;
+  const link = fsubs[0]?.answers?.receipt?.url;
+  check("responses include a signed file link", !!link && fsubs[0].answers.receipt.name === "receipt.png", fsubs[0]?.answers);
+  check("signed link opens the file", (await fetch(`${S.base}${link}`)).status === 200);
+  check("file needs access or a signature", (await fetch(`${S.base}/api/uploads/${ffid}/${frB.fileId}`)).status === 401);
+
+  suite("QA round: accounts (P1-6, 19, 21, 47)");
+  const bq = await api("GET", "/ai/budget", undefined, qa.token);
+  check("budget says AI is not ready without a key", bq.body.aiReady === false && bq.body.source === "none", bq.body);
+  check("unsaved key with a bad format rejected", (await api("POST", "/ai/test", { provider: "anthropic", apiKey: "sk-wrong-key-123456" }, qa.token)).body?.code === "BAD_KEY_FORMAT");
+  check("saving an OpenAI key as Claude rejected", (await api("PUT", "/auth/settings", { ai: { anthropicKey: "sk-proj-abcdefghijk" } }, qa.token)).status === 400);
+  const oldToken = qa.token;
+  const pwc = await api("PUT", "/auth/password", { currentPassword: pw, newPassword: "NewPassw0rd!" }, qa.token);
+  check("password change returns a fresh token", pwc.status === 200 && !!pwc.body.token);
+  check("old sessions are signed out after a password change", (await api("GET", "/auth/me", undefined, oldToken)).status === 401);
+  check("new token works", (await api("GET", "/auth/me", undefined, pwc.body.token)).status === 200);
+  check("chat list starts empty", (await api("GET", `/analysis/${qid}/chats`, undefined, pwc.body.token)).body?.length === 0);
+  check("missing chat 404", (await api("GET", `/analysis/${qid}/chats/${"a".repeat(24)}`, undefined, pwc.body.token)).status === 404);
+  check("others cannot list chats", (await api("GET", `/analysis/${qid}/chats`, undefined, adminB.token)).status === 403);
+
+  const vSign = await v("POST", "/auth/signup", { type: "individual", email: "forgot@x.co", password: pw, name: "Fo" });
+  await new Promise((r) => setTimeout(r, 600));
+  const vtok = tokenFromMail(smtp.mails.find((m) => m.to.join().includes("forgot@x.co")));
+  await v("POST", "/auth/verify", { token: vtok });
+  const mailsBefore = smtp.mails.length;
+  check("forgot password always answers ok", (await v("POST", "/auth/forgot", { email: "nobody-here@x.co" })).body?.ok === true && (await v("POST", "/auth/forgot", { email: "forgot@x.co" })).body?.ok === true, vSign.status);
+  await new Promise((r) => setTimeout(r, 800));
+  const resetMail = smtp.mails.slice(mailsBefore).find((m) => m.to.join().includes("forgot@x.co"));
+  const rtok = resetMail && (decodeQP(resetMail.body).match(/reset\?token=([A-Za-z0-9_-]+)/) || [])[1];
+  check("reset email carries a link", !!rtok);
+  check("bad reset token rejected", (await v("POST", "/auth/reset", { token: "x".repeat(40), password: "Another1!x" })).status === 400);
+  const rs = await v("POST", "/auth/reset", { token: rtok, password: "Another1!x" });
+  check("reset sets the password and signs in", rs.status === 200 && !!rs.body.token, rs.body);
+  check("reset link is single use", (await v("POST", "/auth/reset", { token: rtok, password: "Another2!x" })).status === 400);
+  check("signs in with the new password", (await v("POST", "/auth/login", { email: "forgot@x.co", password: "Another1!x" })).status === 200);
 
   suite("platform admin");
   check("platform lists companies", (await api("GET", "/admin/companies", undefined, root.body.token)).status === 200);

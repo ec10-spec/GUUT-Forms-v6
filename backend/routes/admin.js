@@ -216,7 +216,7 @@ router.put("/users/:id", async (req, res) => {
   }
   if (newPassword !== undefined) {
     if (typeof newPassword !== "string" || newPassword.length < 8) throw httpError(400, "Password must be at least 8 characters.");
-    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.setPasswordHash(await bcrypt.hash(newPassword, 10));
   }
   await user.save();
   logger.info("admin", `User updated: ${user.email}`, { req, meta: { changed: Object.keys(req.body || {}).filter((k) => k !== "newPassword") } });
@@ -228,7 +228,7 @@ router.put("/users/:id", async (req, res) => {
 // GET /api/admin/usage?days=30: token usage for every user on the platform.
 router.get("/usage", async (req, res) => {
   const days = Number(req.query.days) || 30;
-  const [usage, users, companies] = await Promise.all([usageByUser({ days }), User.find().select("name email role companyId active").limit(2000), Company.find().select("name")]);
+  const [usage, users, companies] = await Promise.all([usageByUser({ days, tz: req.query.tz }), User.find().select("name email role companyId active").limit(2000), Company.find().select("name")]);
   const cname = new Map(companies.map((c) => [String(c._id), c.name]));
   const u = new Map(usage.map((r) => [r.userId, r]));
   const rows = users.map((x) => {

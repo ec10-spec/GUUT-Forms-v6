@@ -95,7 +95,7 @@ router.post("/forms/:id/collaborators", async (req, res) => {
     // A business form: the email must belong to an active person on THIS form's team. Same message
     // whether the email is unknown or belongs to another company.
     user = await User.findOne({ email, companyId: idx.companyId, active: true });
-    if (!user) throw httpError(404, "That email isn't on your team. You can only share with people in your team's directory.");
+    if (!user) throw httpError(404, "That email isn't on your team. You can only share with people in your team's directory.", { code: "NOT_A_MEMBER" });
   }
   if (String(user._id) === idx.ownerId) throw httpError(400, "That person already owns this form.");
   if (user.role === "admin" && String(user.companyId) === String(idx.companyId)) throw httpError(400, "That person is a company admin and already has full access.");

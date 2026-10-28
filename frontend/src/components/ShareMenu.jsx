@@ -127,7 +127,7 @@ export default function ShareMenu({ shareUrl, published, isPublic, listingStatus
               <p className="self-host-hint">
                 Leave this as-is to keep submissions flowing to this GUUT deployment, or point it at your
                 own backend if you've deployed one (see SETUP.md). Either way the downloaded page is a
-                single HTML file with no other dependencies — host it anywhere.
+                single HTML file with no other dependencies. Host it anywhere.
               </p>
               <button className="secondary small self-host-download" onClick={downloadStandalone}>
                 Download standalone HTML

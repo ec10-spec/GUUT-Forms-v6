@@ -54,15 +54,15 @@ export default function NotificationSettings({ user, onUserUpdated }) {
       <form onSubmit={save} className="api-key-form">
         <label className="check-row">
           <input type="checkbox" checked={s.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
-          Email me about new responses to forms I created
+          <span>Email me about new responses to forms I created</span>
         </label>
 
         <fieldset className="notif-modes" disabled={!s.enabled}>
           <legend>How often</legend>
           <label className="check-row">
             <input type="radio" name="mode" checked={s.mode === "every"} onChange={() => set({ mode: "every" })} />
-            After every response
-          </label>
+          <span>After every response</span>
+        </label>
           <label className="check-row">
             <input type="radio" name="mode" checked={s.mode === "hours"} onChange={() => set({ mode: "hours" })} />
             One summary every
@@ -80,16 +80,16 @@ export default function NotificationSettings({ user, onUserUpdated }) {
         {user.role === "admin" && (
           <label className="check-row">
             <input type="checkbox" checked={s.formCreated} onChange={(e) => set({ formCreated: e.target.checked })} />
-            As a company admin, email me when someone in my company creates a form
-          </label>
+          <span>As a company admin, email me when someone in my company creates a form</span>
+        </label>
         )}
         <label className="check-row">
           <input type="checkbox" checked={s.sharedResponses} onChange={(e) => set({ sharedResponses: e.target.checked })} />
-          Also email me about new responses on forms that others share with me or my teams (uses the settings above)
+          <span>Also email me about new responses on forms that others share with me or my teams (uses the settings above)</span>
         </label>
         <label className="check-row">
           <input type="checkbox" checked={s.accessRequests} onChange={(e) => set({ accessRequests: e.target.checked })} />
-          Email me when a teammate asks for access to one of my forms
+          <span>Email me when a teammate asks for access to one of my forms</span>
         </label>
 
         {msg && <p className={msg.ok ? "key-saved-msg" : "error"}>{msg.text}</p>}

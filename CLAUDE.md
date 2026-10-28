@@ -14,6 +14,10 @@ MERN app: `backend/` (Express, Mongoose, ES modules) and `frontend/` (React, Vit
 - Access: `backend/utils/access.js` (owner, admin, editor, viewer; collaborators and team shares; highest role wins).
 - Email verification is off unless `REQUIRE_EMAIL_VERIFICATION=true`.
 - Billing: `backend/utils/plans.js`, placeholder prices; `ENFORCE_BILLING` off by default.
+- Answers: one validator, `backend/utils/answers.js` (copied to `frontend/src/lib/answers.js`; a test keeps them identical). Used by submissions, the importer and analytics. Conditional logic (`showIf: { fieldId, op: eq|in|lte|gte, values }`) lives there too.
+- Files: respondents' uploads and header images are GridFS files in the tenant DB (`utils/uploads.js`, buckets `uploads` and `assets`), never inside documents. Saved AI chats: `AnalysisChat` in the tenant DB.
+- Dates: group by the viewer's IANA zone (`utils/time.js`); the client sends `tz`.
+- Sessions: JWTs carry `tokenVersion`; `User.setPasswordHash()` bumps it. Platform DB name: `PLATFORM_DB_NAME` (see `choosePlatformDbName`). AI cost: `utils/pricing.js`.
 - Frontend: hash routing in `App.jsx`, sidebar in `components/Sidebar.jsx`, logo in `components/Logo.jsx` (CSS variables `--logo-ink`, `--logo-sub`, `--logo-dot`).
 
 ## Rules

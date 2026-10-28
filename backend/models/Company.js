@@ -18,6 +18,7 @@ const CompanySchema = new mongoose.Schema(
     storage: {
       bytes: { type: Number, default: 0 },
       verifiedAt: { type: Date, default: null },
+      updatedAt: { type: Date, default: null }, // last time the total changed
     },
     billing: {
       plan: { type: String, default: null },            // business plan id (utils/plans.js)

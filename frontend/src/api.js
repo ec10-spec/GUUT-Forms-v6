@@ -43,6 +43,7 @@ export async function request(path, options = {}) {
     const err = new Error(body.error || `Request failed: ${res.status}`);
     err.status = res.status;
     err.code = body.code;
+    err.fields = body.fields;
     throw err;
   }
   if (res.status === 204) return null;
@@ -50,6 +51,24 @@ export async function request(path, options = {}) {
 }
 
 export const json = (method, body) => ({ method, body: JSON.stringify(body) });
+
+/** The viewer's IANA time zone, so charts and exports group by their own day. */
+export const tz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; } };
+
+/** Sends raw bytes (files, images) with the auth header. */
+async function upload(path, file, { contentType, filename } = {}) {
+  const headers = { "Content-Type": contentType || file.type || "application/octet-stream" };
+  if (filename) headers["X-Filename"] = encodeURIComponent(filename);
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(BASE + path, { method: "POST", headers, body: file });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { const err = new Error(body.error || `Upload failed: ${res.status}`); err.status = res.status; err.code = body.code; throw err; }
+  return body;
+}
+
+/** Turns a server path like /api/forms/... into a full URL (needed for split deploys). */
+export const assetUrl = (p) => (p && p.startsWith("/api/") ? `${ORIGIN}${p}` : p);
 
 export const api = {
   // auth
@@ -80,7 +99,13 @@ export const api = {
   importResponses: (formId, payload) => request(`/submissions/${formId}/import`, json("POST", payload)),
   me: () => request("/auth/me"),
   updateSettings: (payload) => request("/auth/settings", json("PUT", payload)),
-  changePassword: (currentPassword, newPassword) => request("/auth/password", json("PUT", { currentPassword, newPassword })),
+  async changePassword(currentPassword, newPassword) {
+    const r = await request("/auth/password", json("PUT", { currentPassword, newPassword }));
+    if (r?.token) localStorage.setItem(TOKEN_KEY, r.token); // other devices are signed out; this one stays in
+    return r;
+  },
+  forgotPassword: (email) => request("/auth/forgot", json("POST", { email })),
+  resetPassword: (token, password) => request("/auth/reset", json("POST", { token, password })),
 
   // forms
   listForms: (q = "") => request(`/forms?q=${encodeURIComponent(q)}`),
@@ -89,6 +114,9 @@ export const api = {
   createForm: (form) => request("/forms", json("POST", form)),
   updateForm: (id, form) => request(`/forms/${id}`, json("PUT", form)),
   publishForm: (id) => request(`/forms/${id}/publish`, { method: "POST" }),
+  uploadHeaderImage: (id, blob) => upload(`/forms/${id}/header-image`, blob, { contentType: blob.type }),
+  removeHeaderImage: (id) => request(`/forms/${id}/header-image`, { method: "DELETE" }),
+  uploadFile: (formId, fieldId, file) => upload(`/uploads/${formId}/${fieldId}`, file, { filename: file.name }),
   duplicateForm: (id) => request(`/forms/${id}/duplicate`, { method: "POST" }),
   deleteForm: (id) => request(`/forms/${id}`, { method: "DELETE" }),
 
@@ -97,7 +125,7 @@ export const api = {
   listSubmissions: (formId, q = "") => request(`/submissions/${formId}?q=${encodeURIComponent(q)}`),
   // CSV needs the auth header, so it's fetched and saved as a file (a bare link can't send it).
   async downloadCsv(formId, title = "form") {
-    const res = await fetch(`${BASE}/submissions/${formId}/export.csv`, {
+    const res = await fetch(`${BASE}/submissions/${formId}/export.csv?tz=${encodeURIComponent(tz())}`, {
       headers: { Authorization: `Bearer ${getToken()}` },
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Export failed");
@@ -110,7 +138,7 @@ export const api = {
   },
 
   async downloadPdf(formId, title = "form") {
-    const res = await fetch(`${BASE}/submissions/${formId}/export.pdf`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const res = await fetch(`${BASE}/submissions/${formId}/export.pdf?tz=${encodeURIComponent(tz())}`, { headers: { Authorization: `Bearer ${getToken()}` } });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Export failed");
     const url = URL.createObjectURL(await res.blob());
     const el = document.createElement("a");
@@ -123,7 +151,7 @@ export const api = {
   // ai
   generateForm: (prompt, { maxTokens, attachment } = {}) =>
     request("/ai/generate-form", json("POST", { prompt, maxTokens, attachment })),
-  testAi: () => request("/ai/test", { method: "POST" }),
+  testAi: (unsaved) => request("/ai/test", json("POST", unsaved || {})),
   getAiBudget: () => request("/ai/budget"),
 
   // problem reports + automatic front-end error logging (stored by the backend)
@@ -163,14 +191,17 @@ export const api = {
   testEmail: () => request("/notifications/test", { method: "POST" }),
 
   // response analytics + AI assistant
-  analysisSummary: (formId) => request(`/analysis/${formId}/summary`),
-  analysisChat: (formId, payload) => request(`/analysis/${formId}/chat`, json("POST", payload)),
+  analysisSummary: (formId) => request(`/analysis/${formId}/summary?tz=${encodeURIComponent(tz())}`),
+  analysisChat: (formId, payload) => request(`/analysis/${formId}/chat`, json("POST", { tz: tz(), ...payload })),
+  analysisChats: (formId) => request(`/analysis/${formId}/chats`),
+  analysisChatGet: (formId, chatId) => request(`/analysis/${formId}/chats/${chatId}`),
+  analysisChatDelete: (formId, chatId) => request(`/analysis/${formId}/chats/${chatId}`, { method: "DELETE" }),
 
   // AI token tracking
-  usageMe: (days = 30) => request(`/usage/me?days=${days}`),
+  usageMe: (days = 30) => request(`/usage/me?days=${days}&tz=${encodeURIComponent(tz())}`),
   usageStorage: () => request("/usage/storage"),
   companyStorageRecalc: () => request("/company/storage/recalculate", { method: "POST" }),
-  usageTeam: (days = 30) => request(`/usage/team?days=${days}`),
+  usageTeam: (days = 30) => request(`/usage/team?days=${days}&tz=${encodeURIComponent(tz())}`),
 
   shareUrl: (formId) => `${window.location.origin}${window.location.pathname}#/f/${formId}`,
 };

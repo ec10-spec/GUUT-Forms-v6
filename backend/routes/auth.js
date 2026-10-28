@@ -14,7 +14,8 @@ import { normalizeJoinCode, uniqueJoinCode } from "../utils/joinCode.js";
 import { planById } from "../utils/plans.js";
 import FormIndex from "../models/FormIndex.js";
 import { verificationRequired, issueVerification, findByToken, discardUnverified } from "../utils/emailVerification.js";
-import { mailEnabled as mailOn } from "../utils/mailer.js";
+import { mailEnabled as mailOn, sendMail, renderEmail, appUrl } from "../utils/mailer.js";
+import crypto from "crypto";
 
 const router = Router();
 
@@ -235,6 +236,8 @@ router.put("/settings", requireAuth, async (req, res) => {
       if (typeof ai[field] !== "string") continue;
       const key = ai[field].trim();
       if (key && (key.length > 400 || /\s/.test(key))) throw httpError(400, "That doesn't look like a valid API key.");
+      if (key && field === "anthropicKey" && !key.startsWith("sk-ant-")) throw httpError(400, "Claude keys start with sk-ant-. Check that you copied the whole key.", { code: "BAD_KEY_FORMAT" });
+      if (key && field === "openaiKey" && (!key.startsWith("sk-") || key.startsWith("sk-ant-"))) throw httpError(400, "OpenAI keys start with sk-. Check that you copied the whole key.", { code: "BAD_KEY_FORMAT" });
       user.ai[path] = key ? encrypt(key) : null;
       if (field === "anthropicKey" && !key) user.settings.aiApiKeyEncrypted = null; // clear legacy copy too
       logger.info("auth", `AI key ${key ? "saved" : "removed"} (${field.replace("Key", "")})`, { req });
@@ -281,10 +284,53 @@ router.put("/password", requireAuth, authLimiter, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (typeof newPassword !== "string" || newPassword.length < MIN_PW) throw httpError(400, `New password must be at least ${MIN_PW} characters.`);
   if (!(await bcrypt.compare(String(currentPassword || ""), req.user.passwordHash))) throw httpError(400, "Current password is incorrect.");
-  req.user.passwordHash = await bcrypt.hash(newPassword, 10);
+  req.user.setPasswordHash(await bcrypt.hash(newPassword, 10));
   await req.user.save();
   logger.info("auth", "Password changed", { req });
-  res.json({ ok: true });
+  // Other devices are signed out; this one gets a fresh token so it stays signed in.
+  res.json({ ok: true, token: signToken(req.user) });
+});
+
+// ---- Forgot password. The reset email needs SMTP (see the go-live checklist); the routes work today.
+// POST /api/auth/forgot { email }: always answers the same, so it can't be used to find accounts.
+const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: "Too many requests. Try again later." } });
+const RESET_TTL_MS = 60 * 60 * 1000;
+const sha = (t) => crypto.createHash("sha256").update(t).digest("hex");
+router.post("/forgot", forgotLimiter, async (req, res) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const user = isEmail(email) ? await User.findOne({ email, active: true }) : null;
+  if (user) {
+    const token = crypto.randomBytes(32).toString("base64url");
+    user.passwordReset = { tokenHash: sha(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) };
+    await user.save();
+    const { text, html } = renderEmail({
+      heading: "Reset your password",
+      lines: ["Someone asked to reset the password for your GUUT Forms account. Use the button to choose a new one. The link works for 1 hour and only once."],
+      cta: "Choose a new password", url: `${appUrl()}/#/reset?token=${token}`,
+      footer: "If you didn't ask for this, you can ignore this email. Your password stays the same.",
+    });
+    const r = await sendMail({ to: user.email, subject: "Reset your GUUT Forms password", text, html });
+    req.userId = String(user._id);
+    logger.info("auth", `Password reset requested: ${user.email}`, { req, meta: { emailSent: r.sent } });
+    if (!r.sent) logger.warn("auth", "Password reset email could not be sent (SMTP not configured or failed)", { req });
+  }
+  res.json({ ok: true, emailConfigured: mailOn() });
+});
+
+// POST /api/auth/reset { token, password }: sets the new password, signs out every other session and signs in.
+router.post("/reset", authLimiter, async (req, res) => {
+  const { token, password } = req.body || {};
+  if (typeof password !== "string" || password.length < MIN_PW) throw httpError(400, `Password must be at least ${MIN_PW} characters.`);
+  const user = typeof token === "string" && token.length >= 20 && token.length <= 200
+    ? await User.findOne({ "passwordReset.tokenHash": sha(token), "passwordReset.expiresAt": { $gt: new Date() } })
+    : null;
+  if (!user || !user.active) throw httpError(400, "This reset link is invalid or has expired. Ask for a new one.", { code: "BAD_RESET_TOKEN" });
+  user.setPasswordHash(await bcrypt.hash(password, 10));
+  user.emailVerified = true; // they proved they own the address
+  await user.save();
+  req.userId = String(user._id);
+  logger.info("auth", `Password reset: ${user.email}`, { req });
+  res.json({ token: signToken(user), user: await sessionUser(user) });
 });
 
 export default router;

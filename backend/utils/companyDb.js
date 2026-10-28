@@ -49,6 +49,21 @@ export async function copyCompanyData(companyId, from, to) {
     }
     await insert(to.Submission, batch, "submissions");
   }
+  // Saved AI chats, uploaded files and header images move with the forms.
+  stats.chats = 0; stats.files = 0;
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    await insert(to.AnalysisChat, await from.AnalysisChat.find({ formId: { $in: chunk } }).lean(), "chats");
+    for (const b of ["uploads", "assets"]) {
+      const files = await from.conn.db.collection(`${b}.files`).find({ "metadata.formId": { $in: chunk.map(String) } }).toArray();
+      if (!files.length) continue;
+      const fileIds = files.map((f) => f._id);
+      try { await to.conn.db.collection(`${b}.files`).insertMany(files, { ordered: false }); stats.files += files.length; } catch (e) { if (e.code !== 11000 && e.writeErrors?.[0]?.code !== 11000) throw e; }
+      for await (const c of from.conn.db.collection(`${b}.chunks`).find({ files_id: { $in: fileIds } })) {
+        try { await to.conn.db.collection(`${b}.chunks`).insertOne(c); } catch (e) { if (e.code !== 11000) throw e; }
+      }
+    }
+  }
   // Prove the copy is complete before anyone deletes the source.
   let srcSubs = 0;
   for (let i = 0; i < ids.length; i += 100) srcSubs += await from.Submission.countDocuments({ formId: { $in: ids.slice(i, i + 100) } });
@@ -78,6 +93,12 @@ export async function linkDatabase({ company, rawUri, migrate, req }) {
         for (let i = 0; i < migrated.sourceIds.length; i += 100) {
           const chunk = migrated.sourceIds.slice(i, i + 100);
           await source.Submission.deleteMany({ formId: { $in: chunk } });
+          await source.AnalysisChat.deleteMany({ formId: { $in: chunk } });
+          for (const b of ["uploads", "assets"]) {
+            const files = await source.conn.db.collection(`${b}.files`).find({ "metadata.formId": { $in: chunk.map(String) } }).project({ _id: 1 }).toArray();
+            await source.conn.db.collection(`${b}.chunks`).deleteMany({ files_id: { $in: files.map((f) => f._id) } });
+            await source.conn.db.collection(`${b}.files`).deleteMany({ _id: { $in: files.map((f) => f._id) } });
+          }
           await source.Form.deleteMany({ _id: { $in: chunk } });
         }
         migrated.removedFromHosted = true;

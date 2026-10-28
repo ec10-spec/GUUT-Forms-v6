@@ -23,7 +23,8 @@ export default function ApprovalsPage({ onCount }) {
   if (!data) return <p className="muted">Loading...</p>;
 
   return (
-    <div className="approvals-page">
+    <div className="admin-page approvals-page">
+      <span className="hero-eyebrow"><span className="dot" /> Company admin</span>
       <h1>Approvals</h1>
       <p className="settings-hint">Decisions waiting for you. {data.total === 0 ? "Nothing is waiting right now." : `${data.total} waiting.`}</p>
       {error && <p className="error">{error}</p>}

@@ -176,7 +176,7 @@ app treated that page as login-only. It now works for someone who isn't signed i
 - **Signed-out layout.** A top bar (logo, About, Pricing, Explore, Sign in) replaces the sidebar. There is a Pricing page; prices are placeholders in `backend/utils/plans.js`.
 - **Email confirmation is off by default.** The code is kept. Turn it on with `REQUIRE_EMAIL_VERIFICATION=true` once SMTP is tested. In Render, set it to `false` now (render.yaml already does for new deploys; an existing service keeps its old value until you change it).
 - **Sharing and teams for everyone.** Any account can share a form with any other account by email. Individuals can create open teams (friends, a class, a club) and add anyone who has an account. Team members get an email when added. A person can opt in to emails about new responses on forms shared with them (Settings, Notifications).
-- **Everything except database hosting is available to everyone.** Linking your own database and "Run on your own server" are for business accounts and the platform team only.
+- **Everything except database hosting is available to everyone.** Linking your own database and sending a downloaded HTML form's responses to your own server are for business accounts and the platform team only. Every account can download a form as an HTML file (see "Shareable HTML file" below).
 - **Company join link.** A company admin copies the link under Admin (Invite people). People sign in or sign up through it and ask to join; an admin approves under Approvals. Someone whose personal account already has forms is asked to use another email.
 - **Approvals tab** (company admins). People asking to join, and forms waiting to be listed in the public repository. In a business, a member's "List in public repository" waits for admin approval; an admin's own listing is approved immediately.
 - **Import older responses.** Responses tab, Import. Upload CSV or Excel, check the column matching, run Check rows, then Import. Values are converted to each field's type; the original date column can be kept. Imported rows are marked.
@@ -207,3 +207,14 @@ app treated that page as login-only. It now works for someone who isn't signed i
 2. In your repo folder: `git rm -r -q .` then `git clean -fdx -e .git`, then copy the unzipped contents in: `cp -a /path/to/GUUT-Forms-2-main/. .`
 3. `git add -A && git commit -m "v11" && git push` (to `main`). The test workflow is saved as `docs/ci-test-workflow.yml`; to activate it later, move it to `.github/workflows/test.yml` and push with a token that has the `workflow` scope.
 4. In Render, Environment: set `REQUIRE_EMAIL_VERIFICATION` to `false`, optionally add `PLATFORM_AI_KEY`. Render redeploys on push.
+
+## Shareable HTML file (every account)
+
+- **Where.** Share menu, Download as HTML file (published forms only). Individuals, business members, admins and the platform team all get it.
+- **What it is.** One self-contained `.html` file. Send it as an attachment, put it on Google Drive or Dropbox, upload it to any website, or open it from a computer. No GUUT sign-in is needed to fill it in.
+- **Where responses go.** To this deployment's `/api/submissions/:id`, so they are stored like any other response: GUUT's hosted database (`guut_hosted`) for individuals and businesses on hosted storage, the company's own database for businesses that linked one. Notifications, storage caps, validation and file uploads work the same.
+- **Stays current.** On open, the file loads the live form. Edits made after the download show up; an unpublished or deleted form shows "not accepting responses". Offline, it falls back to the copy inside the file.
+- **Branding.** Free accounts show "Made with GUUT Forms"; business forms do not.
+- **CORS.** The respondent endpoints (submit, upload, form, header image) accept any origin, including a file opened from disk, even when `CORS_ORIGIN` is set. The rest of the API still follows `CORS_ORIGIN`.
+- **Own server (business and platform team).** "Send responses to a different server" writes another API base URL into the file. That backend must run this codebase.
+

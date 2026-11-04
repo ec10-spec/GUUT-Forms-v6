@@ -5,7 +5,7 @@ import fs from "fs";
 const stamp = Date.now().toString(36);
 const mongo = await testMongo(`guut_test_${stamp}`);
 const smtp = await startSmtpSink(2599);
-const S = await startServer({ port: 4599, mongoUri: mongo.uri, dbSuffix: stamp, env: { INDIVIDUAL_MAX_STORAGE_MB: "0.01" } });
+const S = await startServer({ port: 4599, mongoUri: mongo.uri, dbSuffix: stamp, env: { INDIVIDUAL_MAX_STORAGE_MB: "0.01", CORS_ORIGIN: "https://app.example.test" } });
 const V = await startServer({ port: 4598, mongoUri: mongo.uri + "v", dbSuffix: stamp + "v", env: {
   REQUIRE_EMAIL_VERIFICATION: "true", SMTP_HOST: "127.0.0.1", SMTP_PORT: "2599", SMTP_SECURE: "false", SMTP_FROM: "GUUT <no-reply@test.local>" } });
 const { api } = S;
@@ -327,6 +327,36 @@ try {
   check("reset sets the password and signs in", rs.status === 200 && !!rs.body.token, rs.body);
   check("reset link is single use", (await v("POST", "/auth/reset", { token: rtok, password: "Another2!x" })).status === 400);
   check("signs in with the new password", (await v("POST", "/auth/login", { email: "forgot@x.co", password: "Another1!x" })).status === 200);
+
+  suite("shareable HTML file (every account)");
+  const hi = await account(api, { type: "individual", email: "html@x.co", password: pw, name: "Hal" });
+  const hf = await api("POST", "/forms", form("HTML </script> form"), hi.token);
+  const hid = hf.body?._id;
+  await api("POST", `/forms/${hid}/publish`, {}, hi.token);
+  const raw = (method, url, headers = {}, body) => fetch(S.base + "/api" + url, { method, headers, body });
+  const pre = await raw("OPTIONS", `/submissions/${hid}`, { Origin: "null", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type" });
+  check("file:// preflight to submit allowed despite CORS_ORIGIN", pre.headers.get("access-control-allow-origin") === "null" && /content-type/i.test(pre.headers.get("access-control-allow-headers") || ""), pre.status);
+  const xs = await raw("POST", `/submissions/${hid}`, { Origin: "https://someone-elses-site.test", "Content-Type": "application/json" }, JSON.stringify({ answers: { f1: "From HTML", f2: "A" } }));
+  check("cross-origin submit to an individual's form lands in the hosted DB", xs.status === 201 && xs.headers.get("access-control-allow-origin") === "https://someone-elses-site.test", xs.status);
+  check("owner sees the HTML response", JSON.stringify((await api("GET", `/submissions/${hid}`, undefined, hi.token)).body).includes("From HTML"));
+  const xf = await raw("GET", `/forms/${hid}`, { Origin: "null" });
+  const xfb = await xf.json();
+  check("live form readable cross-origin, no owner details", xf.headers.get("access-control-allow-origin") === "null" && !!xfb.publishedAt && !xfb.ownerId && xfb.hideBranding === false, xfb);
+  const upPre = await raw("OPTIONS", `/uploads/${hid}/f1`, { Origin: "null", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type,x-filename" });
+  check("file upload preflight allowed", upPre.headers.get("access-control-allow-origin") === "null" && /x-filename/i.test(upPre.headers.get("access-control-allow-headers") || ""));
+  const lockedPre = await raw("OPTIONS", `/submissions/${hid}`, { Origin: "https://evil.test", "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization" });
+  check("reading responses cross-origin still follows CORS_ORIGIN", lockedPre.headers.get("access-control-allow-origin") !== "https://evil.test");
+  const lockedForms = await raw("OPTIONS", `/forms`, { Origin: "https://evil.test", "Access-Control-Request-Method": "POST" });
+  check("app routes still locked to CORS_ORIGIN", lockedForms.headers.get("access-control-allow-origin") !== "https://evil.test");
+  const allowedApp = await raw("OPTIONS", `/forms`, { Origin: "https://app.example.test", "Access-Control-Request-Method": "POST" });
+  check("configured origin still allowed on app routes", allowedApp.headers.get("access-control-allow-origin") === "https://app.example.test");
+  const { generateStandaloneHtml } = await import(new URL("../../frontend/src/lib/standaloneExport.js", import.meta.url));
+  const html = generateStandaloneHtml({ ...hf.body, _id: hid }, "https://guut.example.test");
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  let parses = false;
+  try { new Function(scripts[0][1]); parses = true; } catch {}
+  check("generated HTML has one script that parses (title with </script> is escaped)", scripts.length === 1 && parses);
+  check("generated HTML posts to the given API base", html.includes('"https://guut.example.test"') && html.includes(hid));
 
   suite("platform admin");
   check("platform lists companies", (await api("GET", "/admin/companies", undefined, root.body.token)).status === 200);

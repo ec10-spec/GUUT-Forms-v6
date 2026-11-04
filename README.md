@@ -85,11 +85,13 @@ Real routes, so the browser back/forward buttons work everywhere:
 - **One page per form**: Build / Preview / Responses are tabs on the same
   screen, no navigating away.
 - **Share menu**: persistent top-right control (same pattern as Google
-  Forms/Docs). Copy link is live once published; "Run on your own server"
-  downloads a self-contained standalone HTML copy of the form that can be
-  hosted anywhere and points its submissions at any API base URL you give it
-  (this deployment's, or your own); "Share with people to edit" is a visible
-  placeholder for the Phase 2 permissions feature.
+  Forms/Docs). Copy link is live once published. "Download as HTML file" (every
+  account) gives one self-contained file anyone can open and fill in; it
+  loads the live questions when online and sends responses to this
+  deployment, so individuals' responses land in GUUT's hosted database and
+  businesses' in their own. Business accounts and the platform team can also
+  send the file's responses to a backend they run. "Share with people" gives
+  view or edit access.
 - **Responses**: search/filter, CSV export.
 - **About page**: use cases and the AI use case/USP, in GUUT's voice.
 

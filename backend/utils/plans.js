@@ -14,13 +14,13 @@ export const INDIVIDUAL = {
   tagline: "For students, creators and small groups",
   priceLabel: "$0",
   note: "Usage-based pricing will be added later. There is no limit today.",
-  features: ["Unlimited forms and responses (for now)", "Charts, PDF export and response import", "Share forms and create team spaces with anyone", "AI assistant with your own key. $5 free AI credit coming soon", "Hosted by us, nothing to set up"],
+  features: ["Unlimited forms and responses (for now)", "Charts, PDF export and response import", "Share forms and create team spaces with anyone", "Download any form as a shareable HTML file", "AI assistant with your own key. $5 free AI credit coming soon", "Hosted by us, nothing to set up"],
   // null = unlimited. Set INDIVIDUAL_MAX_FORMS / INDIVIDUAL_MAX_RESPONSES_PER_MONTH to start enforcing.
   limits: () => ({ maxForms: num(process.env.INDIVIDUAL_MAX_FORMS), maxResponsesPerMonth: num(process.env.INDIVIDUAL_MAX_RESPONSES_PER_MONTH), maxStorageMb: num(process.env.INDIVIDUAL_MAX_STORAGE_MB) }),
 };
 
 export const BUSINESS_PLANS = [
- { id: "starter", name: "Starter", priceLabel: "$29 / month", placeholder: true, maxSeats: 5, maxStorageMb: 500, features: ["Everything in Free", "Up to 5 team members", "500 MB hosted storage", "Company join link and approvals", "Connect your own database", "Run on your own server", "Remove GUUT branding from public forms"] },
+ { id: "starter", name: "Starter", priceLabel: "$29 / month", placeholder: true, maxSeats: 5, maxStorageMb: 500, features: ["Everything in Free", "Up to 5 team members", "500 MB hosted storage", "Company join link and approvals", "Connect your own database", "Send HTML form responses to your own server", "Remove GUUT branding from public forms"] },
  { id: "growth", name: "Growth", priceLabel: "$99 / month", placeholder: true, maxSeats: 25, maxStorageMb: 5120, features: ["Up to 25 team members", "5 GB hosted storage", "Everything in Starter", "Team usage tracking for admins"] },
  { id: "scale", name: "Scale", priceLabel: "Custom", placeholder: true, maxSeats: null, maxStorageMb: null, features: ["Unlimited team members", "Custom storage", "Everything in Growth", "Help with onboarding and a dedicated database"] },
 ];

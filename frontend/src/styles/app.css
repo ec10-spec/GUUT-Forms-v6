@@ -1123,3 +1123,9 @@ button.link-btn.danger-link { color: var(--danger); }
 .settings-panel + .settings-panel { margin-top: 16px; }
 .pub-bar button, .pub-bar .pub-link { white-space: nowrap; }
 @media (max-width: 420px) { .pub-nav { gap: 0; } .pub-link { padding: 8px 6px; } .pub-brand .logo { max-width: 110px; } }
+
+/* Share menu: the HTML download sits right under Copy link and gets its own button. */
+.share-row.share-row-featured { cursor: default; border: 1px solid var(--gold-soft); background: color-mix(in srgb, var(--gold-soft) 45%, transparent); margin: 4px 0; }
+.share-row.share-row-featured:hover:not(.disabled) { background: color-mix(in srgb, var(--gold-soft) 70%, transparent); }
+.share-download-btn { white-space: nowrap; flex-shrink: 0; }
+.share-section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); padding: 10px 10px 2px; border-top: 1px solid var(--border); margin-top: 6px; }

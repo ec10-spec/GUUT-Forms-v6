@@ -84,6 +84,16 @@ export default function ShareMenu({ shareUrl, published, isPublic, listingStatus
             {published && <span className="share-row-action">{copied ? "Copied" : "Copy"}</span>}
           </div>
 
+          <div className={`share-row share-row-featured ${published ? "" : "disabled"}`} title={published ? "" : "Publish this form first"}>
+            <div>
+              <strong>Download as HTML file</strong>
+              <span>{published ? "One file anyone can open and fill in. Email it, upload it or add it to any website. Responses still come here." : "Publish the form first"}</span>
+            </div>
+            <button type="button" className="primary small share-download-btn" disabled={!published} onClick={downloadStandalone}>
+              {downloaded ? "Downloaded" : "Download"}
+            </button>
+          </div>
+
           <div className={`share-row ${published ? "" : "disabled"}`} onClick={openInNewTab} title={published ? "" : "Publish this form first"}>
             <div>
               <strong>Open in new tab</strong>
@@ -109,25 +119,25 @@ export default function ShareMenu({ shareUrl, published, isPublic, listingStatus
           </div>
 
           <div
-            className={`share-row ${published ? "" : "disabled"}`}
-            onClick={() => published && downloadStandalone()}
-            title={published ? "" : "Publish this form first"}
+            className={`share-row ${saved && canManage ? "" : "disabled"}`}
+            onClick={() => { if (saved && canManage) { setOpen(false); onSharePeople?.(); } }}
+            title={!saved ? "Save the form first" : !canManage ? "Only the owner or a company admin can share" : ""}
           >
             <div>
-              <strong>Download as HTML file</strong>
-              <span>{published ? "One file anyone can open and fill in. Send it, upload it or put it on any website" : "Publish the form first"}</span>
+              <strong>Share with people</strong>
+              <span>{!saved ? "Save the form first" : canManage ? "Give teammates view or edit access" : "Only the owner or a company admin can share"}</span>
             </div>
-            {published && <span className="share-row-action">{downloaded ? "Downloaded" : "Download"}</span>}
+            {saved && canManage && <span className="share-row-action">Manage</span>}
           </div>
-
+          {canSelfHost && <div className="share-section-label">Business</div>}
           {canSelfHost && <div
             className={`share-row ${published ? "" : "disabled"}`}
             onClick={() => published && setSelfHostOpen((o) => !o)}
             title={published ? "" : "Publish this form first"}
           >
             <div>
-              <strong>Send responses to a different server</strong>
-              <span>For a backend you run yourself</span>
+              <strong>Connect your own server</strong>
+              <span>Send the HTML file&apos;s responses to a backend you run</span>
             </div>
             {published && <span className="share-row-action">{selfHostOpen ? "Hide" : "Set up"}</span>}
           </div>}
@@ -152,17 +162,6 @@ export default function ShareMenu({ shareUrl, published, isPublic, listingStatus
             </div>
           )}
 
-          <div
-            className={`share-row ${saved && canManage ? "" : "disabled"}`}
-            onClick={() => { if (saved && canManage) { setOpen(false); onSharePeople?.(); } }}
-            title={!saved ? "Save the form first" : !canManage ? "Only the owner or a company admin can share" : ""}
-          >
-            <div>
-              <strong>Share with people</strong>
-              <span>{!saved ? "Save the form first" : canManage ? "Give teammates view or edit access" : "Only the owner or a company admin can share"}</span>
-            </div>
-            {saved && canManage && <span className="share-row-action">Manage</span>}
-          </div>
         </div>
       )}
     </div>

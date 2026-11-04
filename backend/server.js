@@ -37,7 +37,25 @@ const app = express();
 app.set("trust proxy", 1); // behind Render's proxy: real client IPs for rate limits + logs
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" } }));
 const origins = (process.env.CORS_ORIGIN || "").split(",").map((s) => s.trim()).filter(Boolean);
-app.use(cors(origins.length ? { origin: origins } : undefined));
+// Respondent-facing endpoints are open to every origin, so a form's downloaded
+// HTML file works wherever it is opened: any website, a shared drive, or a
+// file on someone's computer (Origin "null"). They never take an Authorization
+// header from another origin, so this exposes nothing an anonymous respondent
+// could not already do through the #/f/<id> link. Everything else follows CORS_ORIGIN.
+const ID = "[a-f\\d]{24}";
+const PUBLIC_ROUTES = [
+  { methods: ["POST"], re: new RegExp(`^/api/submissions/${ID}/?$`, "i") },
+  { methods: ["POST"], re: new RegExp(`^/api/uploads/${ID}/[^/]+/?$`, "i") },
+  { methods: ["GET", "HEAD"], re: new RegExp(`^/api/forms/${ID}/?$`, "i") },
+  { methods: ["GET", "HEAD"], re: new RegExp(`^/api/forms/${ID}/header-image/${ID}/?$`, "i") },
+];
+function isPublicRoute(req) {
+  const method = req.method === "OPTIONS" ? String(req.header("access-control-request-method") || "").toUpperCase() : req.method;
+  return PUBLIC_ROUTES.some((r) => r.methods.includes(method) && r.re.test(req.path));
+}
+const publicCors = cors({ origin: true, credentials: false, methods: ["GET", "HEAD", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "X-Filename", "Accept"], maxAge: 86400 });
+const appCors = cors(origins.length ? { origin: origins } : undefined);
+app.use((req, res, next) => (isPublicRoute(req) ? publicCors : appCors)(req, res, next));
 // Raised: base64 image/PDF attachments (AI generation, reports) exceed the default.
 app.use(express.json({ limit: "10mb" }));
 

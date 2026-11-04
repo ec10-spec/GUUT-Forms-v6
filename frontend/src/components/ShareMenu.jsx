@@ -1,26 +1,29 @@
 import React, { useEffect, useRef, useState } from "react";
-import { generateStandaloneHtml } from "../lib/standaloneExport.js";
+import { generateStandaloneHtml, standaloneFileName } from "../lib/standaloneExport.js";
 import { getUser } from "../api.js";
 
 /**
  * Persistent share control in the workspace header (same pattern as Google
  * Forms/Docs). Copy link and Open in new tab work once the form is published.
  * "List in public repository" toggles whether the form appears on /explore.
- * "Run on your own server" lets the client download a self-contained HTML
- * copy of the form to host wherever they like, instead of relying on our
- * hosted #/f/<id> page — it still posts submissions to a backend (this one
- * by default, or their own if they've deployed one, see SETUP.md).
+ * "Download as HTML file" is open to every account: a single self-contained
+ * file anyone can share (email, Drive, any website). Responses go to this
+ * deployment, so they land in GUUT's hosted database or the company's own
+ * database. Business accounts and the platform team can also point the file
+ * at their own backend ("Send responses to a different server", SETUP.md).
  * "Share with people" opens per-form sharing (view/edit access for teammates).
  */
 export default function ShareMenu({ shareUrl, published, isPublic, listingStatus = "none", onTogglePublic, form, canManage = true, onSharePeople }) {
   const saved = !!form?._id;
-  // Standalone export is for business accounts and the platform team only.
+  // Anyone can download the HTML file; only business accounts and the platform
+  // team can send its responses to a different backend.
   const me = getUser();
   const canSelfHost = me?.role === "superadmin" || me?.company?.type === "business";
   const pending = listingStatus === "pending";
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selfHostOpen, setSelfHostOpen] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
   const [apiBase, setApiBase] = useState(() => window.location.origin);
   const ref = useRef(null);
 
@@ -46,16 +49,19 @@ export default function ShareMenu({ shareUrl, published, isPublic, listingStatus
 
   function downloadStandalone() {
     if (!published || !form) return;
-    const html = generateStandaloneHtml(form, apiBase.trim());
+    const base = canSelfHost && apiBase.trim() ? apiBase.trim() : window.location.origin;
+    const html = generateStandaloneHtml(form, base, { appUrl: window.location.origin });
     const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${(form.title || "form").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.html`;
+    a.download = standaloneFileName(form);
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    setDownloaded(true);
+    setTimeout(() => setDownloaded(false), 2000);
   }
 
   return (
@@ -76,6 +82,16 @@ export default function ShareMenu({ shareUrl, published, isPublic, listingStatus
               <span>{published ? "Anyone with the link can fill this out" : "Publish the form first"}</span>
             </div>
             {published && <span className="share-row-action">{copied ? "Copied" : "Copy"}</span>}
+          </div>
+
+          <div className={`share-row share-row-featured ${published ? "" : "disabled"}`} title={published ? "" : "Publish this form first"}>
+            <div>
+              <strong>Download as HTML file</strong>
+              <span>{published ? "One file anyone can open and fill in. Email it, upload it or add it to any website. Responses still come here." : "Publish the form first"}</span>
+            </div>
+            <button type="button" className="primary small share-download-btn" disabled={!published} onClick={downloadStandalone}>
+              {downloaded ? "Downloaded" : "Download"}
+            </button>
           </div>
 
           <div className={`share-row ${published ? "" : "disabled"}`} onClick={openInNewTab} title={published ? "" : "Publish this form first"}>
@@ -102,14 +118,26 @@ export default function ShareMenu({ shareUrl, published, isPublic, listingStatus
             </label>
           </div>
 
+          <div
+            className={`share-row ${saved && canManage ? "" : "disabled"}`}
+            onClick={() => { if (saved && canManage) { setOpen(false); onSharePeople?.(); } }}
+            title={!saved ? "Save the form first" : !canManage ? "Only the owner or a company admin can share" : ""}
+          >
+            <div>
+              <strong>Share with people</strong>
+              <span>{!saved ? "Save the form first" : canManage ? "Give teammates view or edit access" : "Only the owner or a company admin can share"}</span>
+            </div>
+            {saved && canManage && <span className="share-row-action">Manage</span>}
+          </div>
+          {canSelfHost && <div className="share-section-label">Business</div>}
           {canSelfHost && <div
             className={`share-row ${published ? "" : "disabled"}`}
             onClick={() => published && setSelfHostOpen((o) => !o)}
             title={published ? "" : "Publish this form first"}
           >
             <div>
-              <strong>Run on your own server</strong>
-              <span>Download a standalone copy you can host yourself</span>
+              <strong>Connect your own server</strong>
+              <span>Send the HTML file&apos;s responses to a backend you run</span>
             </div>
             {published && <span className="share-row-action">{selfHostOpen ? "Hide" : "Set up"}</span>}
           </div>}
@@ -125,27 +153,15 @@ export default function ShareMenu({ shareUrl, published, isPublic, listingStatus
                 />
               </label>
               <p className="self-host-hint">
-                Leave this as-is to keep submissions flowing to this GUUT deployment, or point it at your
-                own backend if you've deployed one (see SETUP.md). Either way the downloaded page is a
-                single HTML file with no other dependencies. Host it anywhere.
+                Leave this as it is to keep responses in GUUT, or point it at your own deployment (see SETUP.md).
+                The download is still a single HTML file with no other dependencies.
               </p>
               <button className="secondary small self-host-download" onClick={downloadStandalone}>
-                Download standalone HTML
+                Download HTML with this server
               </button>
             </div>
           )}
 
-          <div
-            className={`share-row ${saved && canManage ? "" : "disabled"}`}
-            onClick={() => { if (saved && canManage) { setOpen(false); onSharePeople?.(); } }}
-            title={!saved ? "Save the form first" : !canManage ? "Only the owner or a company admin can share" : ""}
-          >
-            <div>
-              <strong>Share with people</strong>
-              <span>{!saved ? "Save the form first" : canManage ? "Give teammates view or edit access" : "Only the owner or a company admin can share"}</span>
-            </div>
-            {saved && canManage && <span className="share-row-action">Manage</span>}
-          </div>
         </div>
       )}
     </div>

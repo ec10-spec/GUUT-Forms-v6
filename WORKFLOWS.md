@@ -5,9 +5,9 @@
 1. Create account: choose Individual, enter name, email, password. Email confirmation is off for now.
 2. Sign in. You get a personal workspace stored in GUUT's hosted database, with a storage cap (`INDIVIDUAL_MAX_STORAGE_MB`, empty means unlimited).
 3. Build: describe a form to the AI (your own key, or the free AI credit) or start from a template or blank form. Edit fields, set Design, publish.
-4. Share the public link, share by email with any account as Viewer or Editor, or create a team (friends, class, club) and share with the team.
+4. Share the public link, download the form as an HTML file anyone can open (responses still land in GUUT), share by email with any account as Viewer or Editor, or create a team (friends, class, club) and share with the team.
 5. Responses: table, search, field filter, import older responses (CSV or Excel), CSV and PDF export, charts, and an AI assistant over that one form.
-6. Only for businesses: linking your own database, "Run on your own server", company admin, approvals.
+6. Only for businesses: linking your own database, sending the HTML file's responses to your own server, company admin, approvals.
 
 ## Businesses (paid plans, billing set by hand until a payment processor is added)
 

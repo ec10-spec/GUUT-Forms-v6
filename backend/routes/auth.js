@@ -291,7 +291,7 @@ router.put("/password", requireAuth, authLimiter, async (req, res) => {
   res.json({ ok: true, token: signToken(req.user) });
 });
 
-// ---- Forgot password. The reset email needs SMTP (see the go-live checklist); the routes work today.
+// ---- Forgot password. The reset email needs email set up (BREVO_API_KEY or SMTP_*, see SETUP.md).
 // POST /api/auth/forgot { email }: always answers the same, so it can't be used to find accounts.
 const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: "Too many requests. Try again later." } });
 const RESET_TTL_MS = 60 * 60 * 1000;
@@ -309,10 +309,12 @@ router.post("/forgot", forgotLimiter, async (req, res) => {
       cta: "Choose a new password", url: `${appUrl()}/#/reset?token=${token}`,
       footer: "If you didn't ask for this, you can ignore this email. Your password stays the same.",
     });
-    const r = await sendMail({ to: user.email, subject: "Reset your GUUT Forms password", text, html });
     req.userId = String(user._id);
-    logger.info("auth", `Password reset requested: ${user.email}`, { req, meta: { emailSent: r.sent } });
-    if (!r.sent) logger.warn("auth", "Password reset email could not be sent (SMTP not configured or failed)", { req });
+    // Sent in the background so the reply takes the same time whether or not the account exists.
+    sendMail({ to: user.email, subject: "Reset your GUUT Forms password", text, html }).then((r) => {
+      logger.info("auth", `Password reset requested: ${user.email}`, { req, meta: { emailSent: r.sent } });
+      if (!r.sent) logger.warn("auth", `Password reset email could not be sent: ${r.error || r.reason}`, { req });
+    });
   }
   res.json({ ok: true, emailConfigured: mailOn() });
 });

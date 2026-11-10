@@ -4,11 +4,17 @@ import Company from "../models/Company.js";
 import { sendMail, renderEmail, mailEnabled, appUrl } from "./mailer.js";
 import { logger } from "./logger.js";
 
-// Email confirmation at sign-up is built but OFF by default until testing and deployment are done.
-// Turn it on with REQUIRE_EMAIL_VERIFICATION=true (it then needs working SMTP). Needs working SMTP: with verification required
-// and email not configured, sign-up is refused rather than silently skipping the check.
-// 
-export const verificationRequired = () => String(process.env.REQUIRE_EMAIL_VERIFICATION ?? "false").toLowerCase() === "true";
+// Email confirmation at sign-up. REQUIRE_EMAIL_VERIFICATION:
+//   "true"  always required (sign-up is refused while email is not configured)
+//   "false" never required
+//   "auto" or unset: required whenever email is configured, so turning email on
+//   also turns confirmation on, and a server without email keeps working.
+export const verificationRequired = () => {
+  const v = String(process.env.REQUIRE_EMAIL_VERIFICATION ?? "auto").trim().toLowerCase();
+  if (v === "true") return true;
+  if (v === "false") return false;
+  return mailEnabled();
+};
 
 const TTL_MS = 24 * 3600 * 1000;
 const hash = (t) => crypto.createHash("sha256").update(t).digest("hex");
@@ -53,6 +59,6 @@ export async function purgeStaleUnverified() {
 
 export function warnIfMisconfigured() {
   if (verificationRequired() && !mailEnabled()) {
-    console.warn("WARNING: email verification is required but SMTP isn't configured, so sign-ups are refused. Set SMTP_* or leave REQUIRE_EMAIL_VERIFICATION off.");
+    console.warn("WARNING: REQUIRE_EMAIL_VERIFICATION=true but email is not configured, so sign-ups are refused. Set BREVO_API_KEY (or SMTP_*) and MAIL_FROM, or use REQUIRE_EMAIL_VERIFICATION=auto.");
   }
 }

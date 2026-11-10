@@ -1,6 +1,7 @@
 // Full backend regression suite. Run: npm test (from backend/)
 import { check, suite, counts, startServer, testMongo, startSmtpSink, tokenFromMail, decodeQP, account, form } from "./helpers.mjs";
 import fs from "fs";
+import http from "http";
 
 const stamp = Date.now().toString(36);
 const mongo = await testMongo(`guut_test_${stamp}`);
@@ -8,6 +9,23 @@ const smtp = await startSmtpSink(2599);
 const S = await startServer({ port: 4599, mongoUri: mongo.uri, dbSuffix: stamp, env: { INDIVIDUAL_MAX_STORAGE_MB: "0.01", CORS_ORIGIN: "https://app.example.test" } });
 const V = await startServer({ port: 4598, mongoUri: mongo.uri + "v", dbSuffix: stamp + "v", env: {
   REQUIRE_EMAIL_VERIFICATION: "true", SMTP_HOST: "127.0.0.1", SMTP_PORT: "2599", SMTP_SECURE: "false", SMTP_FROM: "GUUT <no-reply@test.local>" } });
+// Fake Brevo API: records each JSON body so tests can read the links out of emails.
+const brevoMails = [];
+const brevo = await new Promise((resolve) => {
+  const srv = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      if (req.headers["api-key"] !== "test-brevo-key") { res.writeHead(401); return res.end('{"message":"Key not found"}'); }
+      try { brevoMails.push(JSON.parse(body)); } catch {}
+      res.writeHead(201, { "Content-Type": "application/json" }); res.end('{"messageId":"<test@brevo>"}');
+    });
+  });
+  srv.listen(2597, "127.0.0.1", () => resolve(srv));
+});
+const B = await startServer({ port: 4597, mongoUri: mongo.uri + "b", dbSuffix: stamp + "b", env: {
+  REQUIRE_EMAIL_VERIFICATION: "", BREVO_API_KEY: "test-brevo-key", BREVO_API_URL: "http://127.0.0.1:2597/v3/smtp/email",
+  MAIL_FROM: "GUUT Forms <guutforms.test@gmail.com>" } });
 const { api } = S;
 const pw = "Passw0rd!x";
 
@@ -130,6 +148,55 @@ try {
   check("valid token verifies and signs in", ok.status === 200 && !!ok.body.token, ok.body);
   check("token is single use", (await v("POST", "/auth/verify", { token: tok })).status === 400);
   check("verified user can log in", (await v("POST", "/auth/login", { email: "newbie@x.co", password: pw })).status === 200);
+
+  suite("email via Brevo API (auto verification, sign-in, password reset)");
+  const b = B.api;
+  const mailTo = (addr) => brevoMails.filter((m) => m.to?.[0]?.email === addr);
+  const wait = () => new Promise((r) => setTimeout(r, 600));
+  const bsu = await b("POST", "/auth/signup", { type: "individual", email: "gmailtest@x.co", password: pw, name: "Gia" });
+  check("auto mode: email configured, so sign-up needs confirmation", bsu.status === 201 && bsu.body?.needsVerification === true, bsu.body);
+  await wait();
+  const conf = mailTo("gmailtest@x.co")[0];
+  check("confirmation sent through the Brevo API with the Gmail sender", conf?.sender?.email === "guutforms.test@gmail.com" && conf?.sender?.name === "GUUT Forms" && /Confirm/.test(conf?.subject || ""), conf);
+  const btok = conf && (String(conf.htmlContent || "").match(/verify\?token=([A-Za-z0-9_-]+)/) || [])[1];
+  check("confirmation email carries a link", !!btok);
+  const blocked = await b("POST", "/auth/login", { email: "gmailtest@x.co", password: pw });
+  check("sign-in blocked until confirmed", blocked.status === 403 && blocked.body?.code === "EMAIL_NOT_VERIFIED", blocked.body);
+  await b("POST", "/auth/resend-verification", { email: "gmailtest@x.co" });
+  await wait();
+  check("resend from the sign-in screen sends a new link", mailTo("gmailtest@x.co").length === 2);
+  const newTok = (String(mailTo("gmailtest@x.co")[1]?.htmlContent || "").match(/verify\?token=([A-Za-z0-9_-]+)/) || [])[1];
+  check("older link stops working after a resend", (await b("POST", "/auth/verify", { token: btok })).status === 400);
+  check("new link confirms and signs in", (await b("POST", "/auth/verify", { token: newTok })).status === 200);
+  check("confirmed account signs in", (await b("POST", "/auth/login", { email: "gmailtest@x.co", password: pw })).status === 200);
+  const fg = await b("POST", "/auth/forgot", { email: "gmailtest@x.co" });
+  const fgUnknown = await b("POST", "/auth/forgot", { email: "nobody-here@x.co" });
+  check("forgot password answers the same for known and unknown emails", fg.status === 200 && fgUnknown.status === 200 && JSON.stringify(fg.body) === JSON.stringify(fgUnknown.body), [fg.body, fgUnknown.body]);
+  await wait();
+  const bResetMail = mailTo("gmailtest@x.co").find((m) => /Reset/.test(m.subject || ""));
+  const bRtok = bResetMail && (String(bResetMail.htmlContent || "").match(/reset\?token=([A-Za-z0-9_-]+)/) || [])[1];
+  check("reset email sent with a link", !!bRtok, bResetMail?.subject);
+  check("no reset email for an unknown address", mailTo("nobody-here@x.co").length === 0);
+  check("reset sets a new password", (await b("POST", "/auth/reset", { token: bRtok, password: "NewPassw0rd!y" })).status === 200);
+  check("old password no longer works", (await b("POST", "/auth/login", { email: "gmailtest@x.co", password: pw })).status === 401);
+  check("new password works", (await b("POST", "/auth/login", { email: "gmailtest@x.co", password: "NewPassw0rd!y" })).status === 200);
+  check("reset link is single use", (await b("POST", "/auth/reset", { token: bRtok, password: "Another1!z" })).status === 400);
+  const meB = await b("POST", "/auth/login", { email: "gmailtest@x.co", password: "NewPassw0rd!y" });
+  const tst = await b("POST", "/notifications/test", {}, meB.body?.token);
+  await wait();
+  check("Settings test email goes out", tst.status === 200 && mailTo("gmailtest@x.co").some((m) => /test email/i.test(m.subject || "")), tst.body);
+  const mailer = await import("../utils/mailer.js");
+  const verif = await import("../utils/emailVerification.js");
+  const saved = { ...process.env };
+  for (const k of ["BREVO_API_KEY", "RESEND_API_KEY", "SMTP_HOST", "MAIL_FROM", "SMTP_FROM", "REQUIRE_EMAIL_VERIFICATION"]) delete process.env[k];
+  check("auto mode without email: no confirmation needed", verif.verificationRequired() === false);
+  process.env.SMTP_HOST = "smtp.gmail.com"; process.env.MAIL_FROM = "a@gmail.com";
+  check("auto mode with Gmail SMTP: confirmation needed", verif.verificationRequired() === true && mailer.mailProvider() === "smtp");
+  process.env.REQUIRE_EMAIL_VERIFICATION = "false";
+  check("explicit false switches confirmation off", verif.verificationRequired() === false);
+  check("sender parsing", JSON.stringify(mailer.parseAddress('"GUUT Forms" <x@gmail.com>')) === '{"name":"GUUT Forms","email":"x@gmail.com"}' && mailer.parseAddress("x@gmail.com").email === "x@gmail.com");
+  for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+  Object.assign(process.env, saved);
 
   suite("v11: open teams, join link, approvals, import, copy rules");
   const own3 = await account(api, { type: "individual", email: "own3@x.co", password: pw, name: "Olu" });
@@ -364,7 +431,7 @@ try {
   console.log("  FAIL suite crashed:", e.stack);
   counts().failures.push("crash: " + e.message);
 } finally {
-  S.stop(); V.stop(); smtp.close(); await mongo.stop();
+  S.stop(); V.stop(); B.stop(); brevo.close(); smtp.close(); await mongo.stop();
 }
 
 const { passed, failed, failures } = counts();

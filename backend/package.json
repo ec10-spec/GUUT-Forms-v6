@@ -10,6 +10,7 @@
     "start": "node server.js",
     "test": "node tests/main.test.mjs",
     "test:report": "node tests/report.mjs",
+    "email:test": "node scripts/email-test.mjs",
     "predeploy": "npm test",
     "migrate:platform-db": "node scripts/migrate-platform-db.mjs",
     "migrate:header-images": "node scripts/migrate-header-images.mjs",

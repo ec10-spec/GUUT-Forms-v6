@@ -27,14 +27,21 @@ services:
       - key: SIGNUPS_ENABLED
         value: "true"
       - key: REQUIRE_EMAIL_VERIFICATION
-        value: "false"
+        value: "auto"
       - key: FREE_AI_CREDIT_USD
         value: "5"
       - key: PLATFORM_AI_KEY
         sync: false
       - key: ENFORCE_BILLING
         value: "false"
-      # Email notifications (optional). Leave SMTP_HOST empty to keep emails off.
+      # Email: confirmation, password reset, notifications. Render's free plan blocks
+      # SMTP ports, so use BREVO_API_KEY there; SMTP_* works on paid plans.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: APP_URL
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -42,6 +49,4 @@ services:
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
-        sync: false
-      - key: SMTP_FROM
         sync: false

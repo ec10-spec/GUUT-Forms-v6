@@ -147,7 +147,7 @@ export async function flushDue() {
 
 export function startNotificationScheduler() {
   if (!mailEnabled()) {
-    console.log("Email notifications are off (set SMTP_HOST and SMTP_FROM to enable them).");
+    console.log("Email is off (set BREVO_API_KEY or SMTP_HOST, plus MAIL_FROM, to turn it on).");
     return;
   }
   setInterval(() => flushDue().catch(() => {}), 60 * 1000).unref();

@@ -41,8 +41,8 @@ people on the same team. Roles: Viewer (open form read-only, see responses and c
 Only the owner or a company admin can delete a form, change who has access, or list it publicly. Teammates can ask for
 access from Home (Team forms), and the owner or any company admin approves.
 
-**Email notifications (optional).** Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` and
-`APP_URL` on the backend (any SMTP provider works). With `SMTP_HOST` empty, emails are simply off. Each person chooses in
+**Email notifications (optional).** Set up email as in "Email: confirmation and password reset" below. With no
+email settings, emails are simply off. Each person chooses in
 Settings > Notifications: every response, one summary every N hours, or one email every N responses. Company admins are
 also told when a form is created. Emails carry counts and a link only, never response content. The hours-based digest
 uses an in-process timer, so the backend must stay running (not sleeping).
@@ -99,9 +99,9 @@ the owner removes them at any time.
 **Email confirmation is required at sign-up.** After creating an account, people get a link by email (valid 24 hours,
 single use) and can't sign in until they open it; the link signs them in. Employees joining a company: the company admin is
 emailed about the request only after the employee confirms their address. An unconfirmed sign-up never reserves an email
-(the real owner can sign up again), and unconfirmed accounts are deleted after 7 days. This requires working SMTP
-(`SMTP_*`, `APP_URL`): with confirmation required and no SMTP, sign-up is refused. For local development without email,
-set `REQUIRE_EMAIL_VERIFICATION=false`. Accounts created by an admin, and accounts that existed before this version, count as
+(the real owner can sign up again), and unconfirmed accounts are deleted after 7 days. `REQUIRE_EMAIL_VERIFICATION=auto` (the default)
+turns this on whenever email is set up and off when it is not; `true` always requires it (sign-up is refused without
+email); `false` switches it off. Accounts created by an admin, and accounts that existed before this version, count as
 confirmed.
 
 
@@ -127,7 +127,7 @@ the first time storage is looked at.
 
 ## Go-live test checklist (email and AI have only been tested against stand-ins)
 
-1. Set `SMTP_*` and `APP_URL`. Create a test individual account with a real inbox: the confirmation email should arrive
+1. Set up email (see "Email: confirmation and password reset") and `APP_URL`. Create a test individual account with a real inbox: the confirmation email should arrive
    (check spam; set up SPF/DKIM for your sending domain), and the link should open the app signed in.
 2. Settings > Notifications > "Send test email".
 3. Publish a form, answer it in a private window, and confirm the notification arrives for each mode (every response,
@@ -174,7 +174,7 @@ app treated that page as login-only. It now works for someone who isn't signed i
 ## v11 changes: public site, sharing for everyone, join link, approvals, import, free AI credit
 
 - **Signed-out layout.** A top bar (logo, About, Pricing, Explore, Sign in) replaces the sidebar. There is a Pricing page; prices are placeholders in `backend/utils/plans.js`.
-- **Email confirmation is off by default.** The code is kept. Turn it on with `REQUIRE_EMAIL_VERIFICATION=true` once SMTP is tested. In Render, set it to `false` now (render.yaml already does for new deploys; an existing service keeps its old value until you change it).
+- **Email confirmation** follows `REQUIRE_EMAIL_VERIFICATION` (now `auto`: on whenever email is set up). See "Email: confirmation and password reset".
 - **Sharing and teams for everyone.** Any account can share a form with any other account by email. Individuals can create open teams (friends, a class, a club) and add anyone who has an account. Team members get an email when added. A person can opt in to emails about new responses on forms shared with them (Settings, Notifications).
 - **Everything except database hosting is available to everyone.** Linking your own database and sending a downloaded HTML form's responses to your own server are for business accounts and the platform team only. Every account can download a form as an HTML file (see "Shareable HTML file" below).
 - **Company join link.** A company admin copies the link under Admin (Invite people). People sign in or sign up through it and ask to join; an admin approves under Approvals. Someone whose personal account already has forms is asked to use another email.
@@ -217,4 +217,38 @@ app treated that page as login-only. It now works for someone who isn't signed i
 - **Branding.** Free accounts show "Made with GUUT Forms"; business forms do not.
 - **CORS.** The respondent endpoints (submit, upload, form, header image) accept any origin, including a file opened from disk, even when `CORS_ORIGIN` is set. The rest of the API still follows `CORS_ORIGIN`.
 - **Own server (business and platform team).** "Send responses to a different server" writes another API base URL into the file. That backend must run this codebase.
+
+## Email: confirmation and password reset
+
+Sign-up confirmation, "Forgot password" and notifications all use the same email settings. With
+`REQUIRE_EMAIL_VERIFICATION=auto`, confirmation switches on as soon as email works.
+
+**Render's free plan blocks SMTP ports 25, 465 and 587** (since September 2025), so Gmail SMTP cannot be used there. Use
+the Brevo API on the free plan. Gmail SMTP works on a paid Render plan or a VPS.
+
+**Test setup with a Gmail account and Brevo (free, works on Render's free plan)**
+1. Create a Gmail account for testing, e.g. guutforms.test@gmail.com.
+2. Sign up at brevo.com (free plan, 300 emails a day). Senders, Domains & Dedicated IPs > Senders > Add a sender: enter
+   the Gmail address and click the confirmation link Brevo sends to it.
+3. Brevo: SMTP & API > API keys > Generate a new API key.
+4. Render > Environment: `BREVO_API_KEY` = the key, `MAIL_FROM` = `GUUT Forms <guutforms.test@gmail.com>`,
+   `APP_URL` = the live address (e.g. https://guut-forms-ovf6.onrender.com), `REQUIRE_EMAIL_VERIFICATION` = `auto`.
+   Save; Render redeploys.
+5. Test: sign up with a different real inbox. The confirmation email arrives (check spam), the link signs you in. Sign
+   out, use "Forgot password?", follow the email, set a new password, sign in. Settings > Notifications >
+   "Send test email" also works.
+
+Emails sent from a @gmail.com address through another service may land in spam. Fine for testing; for launch, verify
+your own domain in Brevo and change `MAIL_FROM` to it.
+
+**Gmail SMTP instead (paid Render plan, VPS, or local)**
+1. In the Gmail account: turn on 2-Step Verification, then Google Account > Security > App passwords > create one.
+2. Set `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER` = the Gmail address, `SMTP_PASS` = the 16-character app
+   password, `MAIL_FROM` = `GUUT Forms <the Gmail address>`. Leave `BREVO_API_KEY` empty.
+3. Gmail allows about 500 emails a day from one account.
+
+**Check from the command line:** `cd backend && npm run email:test -- you@example.com` prints which method is active and
+sends one test email. If a host blocks SMTP, the error says so.
+
+Accounts that already exist are not affected: only new sign-ups need to confirm.
 

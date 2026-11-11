@@ -1,0 +1,52 @@
+# Render Blueprint: New + > Blueprint, pick this repo. Every push to the
+# branch auto-deploys. Secrets marked sync:false are asked for once in the dashboard.
+services:
+  - type: web
+    name: guut-forms
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20
+      - key: MONGO_URI
+        sync: false
+      - key: SUPERADMIN_EMAIL
+        sync: false
+      - key: SUPERADMIN_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: SIGNUPS_ENABLED
+        value: "true"
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: "auto"
+      - key: FREE_AI_CREDIT_USD
+        value: "5"
+      - key: PLATFORM_AI_KEY
+        sync: false
+      - key: ENFORCE_BILLING
+        value: "false"
+      # Email: confirmation, password reset, notifications. Render's free plan blocks
+      # SMTP ports, so use BREVO_API_KEY there; SMTP_* works on paid plans.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false

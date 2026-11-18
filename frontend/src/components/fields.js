@@ -21,7 +21,8 @@ export const FILE_KINDS = {
   text: { label: "Plain text", types: ["text/plain"], ext: ".txt" },
 };
 export const DEFAULT_FILE_KINDS = ["image", "pdf"];
-export const MAX_FILE_MB = 10;
+// Matches backend/utils/uploads.js (Vercel caps request bodies at 4.5 MB).
+export const MAX_FILE_MB = 4;
 export const fileKindsOf = (f) => (f.accept?.length ? f.accept : DEFAULT_FILE_KINDS).filter((k) => FILE_KINDS[k]);
 
 // Question types that can drive "Show this field only if", and the operators each one offers.

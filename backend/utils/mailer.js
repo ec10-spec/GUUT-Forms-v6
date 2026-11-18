@@ -73,7 +73,8 @@ async function deliver({ to, subject, text, html }) {
 
 /** Public base URL used for links inside emails. */
 export function appUrl() {
-  return (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:5173").replace(/\/$/, "");
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "";
+  return (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || vercel || "http://localhost:5173").replace(/\/$/, "");
 }
 
 function explain(err) {

@@ -6,6 +6,7 @@ import { tenantForCompanyId } from "../middleware/auth.js";
 import { accessOf, canView } from "../utils/access.js";
 import { assertStorageRoom, bumpStorage } from "../utils/storage.js";
 import { httpError } from "../utils/http.js";
+import { background } from "../utils/background.js";
 import { MAX_UPLOAD_MB, assertUploadAllowed, writeFile, findFile, streamFile, deleteFiles, verifySignature } from "../utils/uploads.js";
 
 // Respondents' files for File Upload questions.
@@ -47,7 +48,7 @@ router.post("/:formId/:fieldId", uploadLimiter, raw, async (req, res) => {
   name = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 200) || "file";
   const company = await Company.findById(idx.companyId);
   await assertStorageRoom(company, buffer.length, { forVisitor: true });
-  purgePending(tenant, idx.companyId).catch(() => {});
+  background(purgePending(tenant, idx.companyId));
   const id = await writeFile(tenant, "uploads", {
     filename: name, contentType: type, buffer,
     metadata: { formId: String(idx._id), fieldId: field.id, submissionId: null, contentType: type },

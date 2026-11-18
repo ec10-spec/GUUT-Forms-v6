@@ -40,7 +40,7 @@ export async function request(path, options = {}) {
     const body = await res.json().catch(() => ({}));
     // A rejected token means the session is over (expired, or account disabled).
     if (res.status === 401 && token) window.dispatchEvent(new Event("guut:session-expired"));
-    const err = new Error(body.error || `Request failed: ${res.status}`);
+    const err = new Error(body.error || (res.status === 413 ? "That is too large to send. Try a smaller file." : `Request failed: ${res.status}`));
     err.status = res.status;
     err.code = body.code;
     err.fields = body.fields;
@@ -63,7 +63,7 @@ async function upload(path, file, { contentType, filename } = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(BASE + path, { method: "POST", headers, body: file });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) { const err = new Error(body.error || `Upload failed: ${res.status}`); err.status = res.status; err.code = body.code; throw err; }
+  if (!res.ok) { const err = new Error(body.error || (res.status === 413 ? "That file is too large to upload." : `Upload failed: ${res.status}`)); err.status = res.status; err.code = body.code; throw err; }
   return body;
 }
 

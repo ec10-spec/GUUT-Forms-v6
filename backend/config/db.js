@@ -9,6 +9,7 @@ const CONN_OPTS = { serverSelectionTimeoutMS: 8000, maxPoolSize: 5 };
 
 // ---------------------------------------------------------------- platform DB
 export async function connectPlatformDB() {
+  if (mongoose.connection.readyState === 1) return; // already connected (a retried start-up)
   let uri = process.env.MONGO_URI;
   if (!uri) {
     if (isProd) throw new Error("MONGO_URI is required in production.");
@@ -17,7 +18,10 @@ export async function connectPlatformDB() {
     console.log("No MONGO_URI set: using a throwaway in-memory MongoDB (data resets on restart).");
   }
   const dbName = await choosePlatformDbName(uri);
-  await mongoose.connect(uri, { serverSelectionTimeoutMS: 15000, ...(dbName ? { dbName } : {}) });
+  // Serverless hosts run many small instances, each with its own pool: keep pools small so the
+  // database's connection limit (500 on Atlas M0) is not reached under load.
+  const pool = process.env.VERCEL ? { maxPoolSize: 10, maxIdleTimeMS: 60000 } : {};
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 15000, ...pool, ...(dbName ? { dbName } : {}) });
   const name = mongoose.connection.name;
   console.log(`Platform DB connected (${mongoose.connection.host}/${name})`);
   if (name === "test") {

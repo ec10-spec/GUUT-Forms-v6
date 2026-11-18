@@ -1,10 +1,12 @@
 # GUUT Forms: project notes for Claude Code
 
-MERN app: `backend/` (Express, Mongoose, ES modules) and `frontend/` (React, Vite). Render serves the built frontend from the backend (`render.yaml`).
+MERN app: `backend/` (Express, Mongoose, ES modules) and `frontend/` (React, Vite). The Express app is `backend/app.js` (exports `app` and `init()`). Two ways to run it:
+- Vercel (primary): `vercel.json`; static frontend from `frontend/dist`; all `/api/*` goes to one function `api/index.js` -> `backend/vercel.js`. No timers on Vercel: fire-and-forget work must go through `utils/background.js` (`waitUntil`), scheduled work through `/api/cron/tick` (`routes/cron.js`, needs `CRON_SECRET`). Request bodies are capped at 4.5 MB by Vercel (uploads 4 MB, imports 3 MB).
+- Long-running server: `backend/server.js` (local, Render via `render.yaml`) serves the built frontend and runs the timers.
 
 ## Commands
 - Run locally: `./run.sh` or `npm --prefix backend start` (no MONGO_URI means a throwaway in-memory DB)
-- Tests: `cd backend && npm install && npm test` (set `TEST_MONGO_URI=mongodb://127.0.0.1:27017` to use an existing MongoDB). Results append to `backend/tests/results.json`; `npm run test:report` prints history. Run before every deploy.
+- Tests: `cd backend && npm install && npm test` (set `TEST_MONGO_URI=mongodb://127.0.0.1:27017` to use an existing MongoDB). Results append to `backend/tests/results.json`; `npm run test:report` prints history. Run before every deploy. `npx vercel build` checks the Vercel build locally.
 - Frontend build: `cd frontend && npm install && npm run build`
 
 ## Architecture

@@ -8,7 +8,8 @@ import { httpError } from "./http.js";
 //   bucket "uploads": respondents' files. metadata { formId, fieldId, submissionId|null }
 //   bucket "assets":  header images.      metadata { formId, kind: "header" }
 
-export const MAX_UPLOAD_MB = 10;
+// 4 MB: Vercel refuses any request body over 4.5 MB before it reaches the app, so larger files could never arrive.
+export const MAX_UPLOAD_MB = 4;
 export const MAX_HEADER_BYTES = 2 * 1024 * 1024;
 
 // Kinds a form owner can allow per question. Each lists MIME types and, where possible, a byte signature.

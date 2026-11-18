@@ -9,7 +9,10 @@ export function assertEnv() {
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 24) problems.push("JWT_SECRET must be set to a long random string (24+ chars).");
   if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 24) problems.push("ENCRYPTION_KEY must be set to a long random string (24+ chars).");
   if (problems.length) {
-    console.error("\nCannot start in production:\n - " + problems.join("\n - ") + "\n");
+    const message = "Cannot start in production:\n - " + problems.join("\n - ");
+    console.error("\n" + message + "\n");
+    // A serverless function must not exit the process; failing the import shows the reason in the logs.
+    if (process.env.VERCEL) throw new Error(message);
     process.exit(1);
   }
 }

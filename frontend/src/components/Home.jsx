@@ -72,6 +72,11 @@ export default function Home({ user, onOpenDraft, onOpenForm }) {
       : ext === "csv" || ext === "txt" || file.type === "text/csv" || file.type === "text/plain"
       ? "text"
       : null;
+    if (file.size > 3 * 1024 * 1024) {
+      setGenError("That file is over 3 MB. Attach a smaller file.");
+      e.target.value = "";
+      return;
+    }
     if (!kind) {
       setGenError("Only images, PDFs, Excel (.xlsx/.xls), or CSV/text files can be attached.");
       return;

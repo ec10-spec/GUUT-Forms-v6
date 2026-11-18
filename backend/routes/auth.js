@@ -7,6 +7,7 @@ import { signToken, requireAuth } from "../middleware/auth.js";
 import { encrypt } from "../utils/crypto.js";
 import { httpError } from "../utils/http.js";
 import { logger } from "../utils/logger.js";
+import { background } from "../utils/background.js";
 import { mailEnabled } from "../utils/mailer.js";
 import { PROVIDERS } from "../utils/aiProviders.js";
 import { notifyJoinRequest } from "../utils/notify.js";
@@ -311,10 +312,10 @@ router.post("/forgot", forgotLimiter, async (req, res) => {
     });
     req.userId = String(user._id);
     // Sent in the background so the reply takes the same time whether or not the account exists.
-    sendMail({ to: user.email, subject: "Reset your GUUT Forms password", text, html }).then((r) => {
+    background(sendMail({ to: user.email, subject: "Reset your GUUT Forms password", text, html }).then((r) => {
       logger.info("auth", `Password reset requested: ${user.email}`, { req, meta: { emailSent: r.sent } });
       if (!r.sent) logger.warn("auth", `Password reset email could not be sent: ${r.error || r.reason}`, { req });
-    });
+    }));
   }
   res.json({ ok: true, emailConfigured: mailOn() });
 });

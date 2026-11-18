@@ -1,7 +1,8 @@
 import React, { useRef, useState } from "react";
 import { api } from "../api.js";
 
-const MAX_BYTES = 6 * 1024 * 1024;
+// The file travels as base64 inside JSON (about 4/3 larger), and Vercel caps request bodies at 4.5 MB.
+const MAX_BYTES = 3 * 1024 * 1024;
 
 function toBase64(file) {
   return new Promise((resolve, reject) => {
@@ -28,7 +29,7 @@ export default function ImportModal({ form, onClose, onImported }) {
 
   async function pick(f) {
     if (!f) return;
-    if (f.size > MAX_BYTES) { setError("That file is over 6 MB. Split it into smaller files."); return; }
+    if (f.size > MAX_BYTES) { setError("That file is over 3 MB. Split it into smaller files."); return; }
     setBusy(true); setError(null);
     try {
       const data = await toBase64(f);
@@ -75,7 +76,7 @@ export default function ImportModal({ form, onClose, onImported }) {
             <p className="settings-hint">Upload older responses as a CSV or Excel file. Each column is matched to a question on this form so your old and new responses sit in one table and can be analysed together. Imported rows are marked as imported.</p>
             <div className="drop-zone" onClick={() => input.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files?.[0]); }}>
               <strong>{busy ? "Reading file..." : "Choose a file or drop it here"}</strong>
-              <span>.csv, .xlsx or .xls, up to 6 MB and 5,000 rows</span>
+              <span>.csv, .xlsx or .xls, up to 3 MB and 5,000 rows</span>
               <input ref={input} type="file" accept=".csv,.xlsx,.xls" hidden onChange={(e) => pick(e.target.files?.[0])} />
             </div>
             <button className="link-btn" onClick={template}>Download a template with this form's columns</button>

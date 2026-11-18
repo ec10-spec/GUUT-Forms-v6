@@ -80,7 +80,16 @@ function replay(req, ms = 3000) {
  * Returns false if the body was invalid JSON and a 400 was sent.
  */
 export async function adoptConsumedBody(req, res) {
-  if (req.readable !== false || req._body) return true;
+  if (req._body) return true;
+  if (req.readable !== false) {
+    // Stream untouched: Express reads it. Vercel's helpers still put a lazy req.body getter on the
+    // request, and body-parser reads req.body first, which runs the helpers' own JSON parser: broken
+    // JSON then throws a plain "Invalid JSON" error (a 500) before body-parser can answer with a 400.
+    if (Object.getOwnPropertyDescriptor(req, "body")?.get) {
+      Object.defineProperty(req, "body", { value: undefined, writable: true, configurable: true, enumerable: true });
+    }
+    return true;
+  }
   const type = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
   const isJson = type === "application/json" || type.endsWith("+json");
   // The helpers replay the body by replacing req.read/req.on on the request itself.

@@ -256,6 +256,16 @@ export default function App() {
   }, []);
   useEffect(() => { setMenuOpen(false); window.scrollTo({ top: 0 }); }, [route.name, route.id]);
 
+  // After a one-time link (password reset, email confirmation) signs someone in: open the home page and
+  // replace the link in the browser history, so Back cannot return to a used token. Setting the route
+  // directly matters: rewriting the address with replaceState fires no hashchange, so the app would
+  // otherwise stay on the link's page.
+  function goHomeAfterLink() {
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/`);
+    lastHash.current = "#/";
+    setRoute(parseHash("#/"));
+  }
+
   function startBlankForm() {
     pendingDraft.current = { title: "Untitled Form", description: "", fields: [], source: "manual", generationPrompt: null };
     navigate("/new");
@@ -364,11 +374,11 @@ export default function App() {
             )}
 
             {(route.name === "reset" || route.name === "forgot") && (
-              <ResetPassword token={route.token} onAuth={(u) => { setUser(u); navigate("/"); }} />
+              <ResetPassword token={route.token} onAuth={(u) => { setUser(u); goHomeAfterLink(); }} />
             )}
 
             {route.name === "verify" && (
-              <VerifyEmail token={route.token} onAuth={(u) => { setUser(u); navigate("/"); }} />
+              <VerifyEmail token={route.token} onAuth={(u) => { setUser(u); goHomeAfterLink(); }} />
             )}
 
             {route.name === "admin" && (

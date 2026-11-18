@@ -26,8 +26,7 @@ export default function ResetPassword({ token, onAuth }) {
     try {
       const r = await api.resetPassword(token, password);
       saveSession(r);
-      window.history.replaceState(null, "", `${window.location.pathname}#/`);
-      onAuth?.(r.user);
+      onAuth?.(r.user); // the app opens the home page and drops the used link from history
     } catch (err) { setError(err.message); setBusy(false); }
   }
 

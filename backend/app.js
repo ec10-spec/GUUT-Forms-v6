@@ -111,7 +111,7 @@ app.use((err, req, res, _next) => {
   }
   if (res.headersSent) return;
   res.status(status).json({
-    error: status >= 500 && !err.code ? "Something went wrong on our end. The team has been notified." : status === 413 && !err.code ? "That file is too large." : err.message,
+    error: status >= 500 && !err.code ? "Something went wrong on our end. The team has been notified." : status === 413 && !err.code ? "That file is too large." : err.type === "entity.parse.failed" ? "The request body isn't valid JSON." : err.message,
     ...(err.code ? { code: err.code } : {}),
     ...(Array.isArray(err.fields) ? { fields: err.fields.map(({ fieldId, message }) => ({ fieldId, message })) } : {}),
   });

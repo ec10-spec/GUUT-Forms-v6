@@ -6,6 +6,7 @@ import NotifyState from "../models/NotifyState.js";
 import { tenantForCompanyId } from "../middleware/auth.js";
 import { sendMail, renderEmail, mailEnabled, appUrl } from "./mailer.js";
 import { logger } from "./logger.js";
+import { background } from "./background.js";
 
 // Every function here is best-effort and NEVER throws: a notification problem
 // must not break form creation, submissions or sharing. Emails carry counts and
@@ -23,9 +24,11 @@ async function titleOf(idx) {
   }
 }
 
-const safe = (fn) => async (...args) => {
+// Callers don't await these, so each run is registered as background work (see utils/background.js):
+// on Vercel the email still goes out after the reply has been sent.
+const safe = (fn) => (...args) => background((async () => {
   try { return await fn(...args); } catch (err) { logger.warn("system", `Notification error: ${String(err.message).slice(0, 200)}`); }
-};
+})());
 
 /** A form was created: tell the company's admins (not the creator). */
 export const notifyFormCreated = safe(async ({ form, companyId, creator }) => {

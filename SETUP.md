@@ -1,7 +1,56 @@
 # Setup
 
-See `backend/.env.example` for every setting and `render.yaml` for the free Render deploy.
+See `backend/.env.example` for every setting. Hosting: Vercel (`vercel.json`, below) or Render (`render.yaml`).
 Local: `bash run.sh` (a dev platform-team login is printed on first start).
+
+---
+
+## Deploying on Vercel (free Hobby plan)
+
+The same code runs on both hosts. On Vercel the frontend is served as static files and the API runs as one
+serverless function (`api/index.js`, which loads `backend/vercel.js`). There is no server that sleeps, so no
+cold wake-up like Render's free plan; the first request to a new instance takes a second or two.
+
+### One-time setup
+1. vercel.com, Add New > Project, import the GitHub repository. Leave Framework Preset as "Other"; build,
+   install and output settings come from `vercel.json`, so leave those fields empty. Root Directory: the repo root.
+2. Settings > Environment Variables (Production). Copy the values from Render, then add the Vercel ones:
+
+   | Variable | Value |
+   | --- | --- |
+   | `NODE_ENV` | `production` |
+   | `MONGO_URI` | same Atlas link as on Render |
+   | `PLATFORM_DB_NAME` | `guut_platform` (or `test` if the database move in v12 has not been done yet) |
+   | `JWT_SECRET` | copy from Render, otherwise everyone is signed out |
+   | `ENCRYPTION_KEY` | copy from Render. Required: linked company databases and saved AI keys are encrypted with it |
+   | `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD` | same as Render |
+   | `APP_URL` | the Vercel address, e.g. `https://guut-forms.vercel.app` (used in email links) |
+   | `BREVO_API_KEY`, `MAIL_FROM` | same as Render |
+   | `SIGNUPS_ENABLED`, `REQUIRE_EMAIL_VERIFICATION`, `FREE_AI_CREDIT_USD`, `PLATFORM_AI_KEY`, `ENFORCE_BILLING` | same as Render |
+   | `CRON_SECRET` | new: any long random string |
+   | `NODEJS_HELPERS` | `0` (recommended, see below) |
+
+3. Settings > Functions: keep Fluid Compute on (the default). It allows the 120-second limit that AI replies need.
+4. MongoDB Atlas > Network Access: keep `0.0.0.0/0`. Vercel has no fixed outbound IPs on the free plan.
+5. Deploy. Check `https://<your-app>/api/health` returns `{"ok":true}`, then sign in.
+6. When Vercel works, suspend the Render service (do not delete it until you are sure).
+
+### What is different from Render
+- **Uploads are capped at 4 MB per file** (was 10 MB). Vercel refuses any request larger than 4.5 MB. Existing
+  questions set to 5 or 10 MB now accept up to 4 MB. Response imports (CSV/Excel) and AI attachments: 3 MB.
+- **Notification digests ("every N hours").** There is no always-running timer. Due digests are sent whenever the
+  app gets traffic (checked at most every 2 minutes) and by Vercel Cron once a day (the free plan allows daily
+  only). For digests on time even when nobody is using the app, add a free external scheduler (e.g. cron-job.org)
+  calling `https://<your-app>/api/cron/tick` every 15 minutes with header `Authorization: Bearer <CRON_SECRET>`.
+  "Every response" and "every N responses" emails are sent straight away, as before.
+- **Rate limits** are counted per function instance rather than for the whole app, so they are looser.
+- `NODEJS_HELPERS=0` stops Vercel pre-reading request bodies. The app also copes when helpers are on
+  (`adoptConsumedBody` in `backend/vercel.js`), so this is a safety setting, not a requirement.
+- Render keeps working from the same code (`render.yaml`, `npm start`) if you need to switch back.
+
+### Free plan terms
+Vercel's Hobby plan is for personal, non-commercial use. Once GUUT Forms takes payments or is run as a business,
+Vercel expects the Pro plan ($20 per user per month). Check Vercel's fair use terms before launch.
 
 
 ---

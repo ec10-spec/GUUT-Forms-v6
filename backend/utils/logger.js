@@ -1,4 +1,5 @@
 import Log from "../models/Log.js";
+import { background } from "./background.js";
 
 // Backend logging. Everything lands in the platform database's "logs"
 // collection (and the console). Writing a log must NEVER break a request, so
@@ -39,7 +40,8 @@ export function log({ level = "info", category = "system", message = "", req, er
   }
   const line = `[${level}] [${category}] ${entry.message}${entry.route ? ` (${entry.route})` : ""}`;
   (level === "error" ? console.error : console.log)(line);
-  return Log.create(entry).catch((e) => console.error("Failed to write log:", e.message));
+  // Registered as background work so the write still finishes on Vercel after the reply is sent.
+  return background(Log.create(entry).catch((e) => console.error("Failed to write log:", e.message)));
 }
 
 export const logger = {

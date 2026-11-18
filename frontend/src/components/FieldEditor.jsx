@@ -134,8 +134,8 @@ export default function FieldEditor({ field, allFields, onChange, onDelete, onDu
             ))}
           </div>
           <label className="inline-num">Largest file
-            <select value={field.maxSizeMb || MAX_FILE_MB} onChange={(e) => update({ maxSizeMb: Number(e.target.value) })}>
-              {[1, 2, 5, 10].map((n) => <option key={n} value={n}>{n} MB</option>)}
+            <select value={Math.min(field.maxSizeMb || MAX_FILE_MB, MAX_FILE_MB)} onChange={(e) => update({ maxSizeMb: Number(e.target.value) })}>
+              {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} MB</option>)}
             </select>
           </label>
         </div>

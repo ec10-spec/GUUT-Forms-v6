@@ -1,6 +1,6 @@
 import { httpError } from "./http.js";
 import { CONDITION_SOURCE_TYPES, CONDITION_OPS } from "./answers.js";
-import { FILE_KINDS } from "./uploads.js";
+import { FILE_KINDS, MAX_UPLOAD_MB } from "./uploads.js";
 import { HEX } from "../models/tenantSchemas.js";
 
 // Server-side checks on a form's structure, run on create and update (the builder runs the same checks).
@@ -31,7 +31,7 @@ export function sanitizeFields(fields) {
       out.accept = (Array.isArray(f.accept) ? f.accept : []).filter((k) => FILE_KINDS[k]);
       if (!out.accept.length) out.accept = undefined;
       const mb = Number(f.maxSizeMb);
-      out.maxSizeMb = Number.isFinite(mb) && mb >= 1 ? Math.min(10, Math.round(mb)) : undefined;
+      out.maxSizeMb = Number.isFinite(mb) && mb >= 1 ? Math.min(MAX_UPLOAD_MB, Math.round(mb)) : undefined;
     } else {
       delete out.accept; delete out.maxSizeMb;
     }

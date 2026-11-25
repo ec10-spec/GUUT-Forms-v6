@@ -17,6 +17,7 @@ import FormIndex from "../models/FormIndex.js";
 import { verificationRequired, issueVerification, findByToken, discardUnverified } from "../utils/emailVerification.js";
 import { mailEnabled as mailOn, sendMail, renderEmail, appUrl } from "../utils/mailer.js";
 import crypto from "crypto";
+import { funnel } from "../utils/funnel.js";
 
 const router = Router();
 
@@ -113,6 +114,7 @@ router.post("/signup", signupLimiter, async (req, res) => {
   const { user, company } = await createAccount({ type, email, name, passwordHash, emailVerified: !mustVerify, companyName, plan, joinCode });
   req.userId = String(user._id);
   logger.info("auth", `Sign-up (${type}): ${user.email}`, { req, meta: { companyId: company?._id || null, verified: !mustVerify } });
+  funnel("signup_done", req, { ownerId: String(user._id), type, via: "email" });
   if (mustVerify) {
     // No session yet: the account works once the emailed link is opened.
     await issueVerification(user);

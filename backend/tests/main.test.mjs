@@ -234,6 +234,8 @@ try {
   check("member cannot approve own listing", (await api("POST", `/company/listings/${fid}/approve`, {}, emp.token)).status === 403);
   check("admin approves listing", (await api("POST", `/company/listings/${fid}/approve`, {}, adminA.token)).status === 200);
   check("form now listed publicly", JSON.stringify((await api("GET", "/forms/public")).body).includes(fid));
+  const listed = (await api("GET", "/forms/public")).body.find((x) => x._id === fid);
+  check("Explore shows the first questions of a listed form", Array.isArray(listed?.preview) && listed.preview[0] === "Name", listed);
 
   const csvText = "Submitted,Name,Pick\n2024-01-05,Old Ann,A\n2024-02-06,Old Bob,B\n,,\n";
   const b64 = Buffer.from(csvText).toString("base64");
@@ -512,6 +514,19 @@ try {
   check("cannot exchange a link ticket for a session", (await api("POST", "/auth/oauth/exchange", { ticket: lt.body.ticket })).status === 400);
   check("disconnect works when a password exists", (await api("DELETE", "/auth/oauth/google", undefined, emp.token)).status === 200);
   check("me lists sign-in methods", Array.isArray((await api("GET", "/auth/me", undefined, emp.token)).body.user.signInMethods));
+
+  suite("v14: funnel, response counts on cards");
+  check("browser funnel event accepted", (await api("POST", "/funnel", { event: "landing_view", ref: "form" })).status === 204);
+  check("unknown funnel event ignored", (await api("POST", "/funnel", { event: "drop_tables" })).status === 204);
+  check("server-only funnel event can't be sent by a browser", (await api("POST", "/funnel", { event: "signup_done" })).status === 204);
+  check("funnel summary is for the platform team only", (await api("GET", "/funnel/summary", undefined, emp.token)).status === 403);
+  const fun = await api("GET", "/funnel/summary", undefined, root.body.token);
+  const ev = (name) => fun.body?.events?.find((e) => e.event === name);
+  check("funnel summary counts steps", fun.status === 200 && ev("landing_view")?.days30 >= 1 && ev("signup_done")?.days30 >= 1 && ev("first_form_created")?.days30 >= 1, fun.body);
+  check("funnel records first publish and first response", ev("first_publish")?.days30 >= 1 && ev("first_response")?.days30 >= 1, fun.body);
+  const cards = await api("GET", "/forms", undefined, emp.token);
+  const card = cards.body.find((x) => x._id === fid);
+  check("form cards carry response count and last response time", Number.isFinite(card?.responseCount) && card.responseCount >= 1 && !!card.lastResponseAt, card && { responseCount: card.responseCount, lastResponseAt: card.lastResponseAt });
 
   suite("platform admin");
   check("platform lists companies", (await api("GET", "/admin/companies", undefined, root.body.token)).status === 200);

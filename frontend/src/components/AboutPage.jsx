@@ -1,5 +1,4 @@
 import React from "react";
-import Logo from "./Logo.jsx";
 
 const USE_CASES = [
   {
@@ -20,11 +19,11 @@ const USE_CASES = [
   },
 ];
 
-export default function AboutPage() {
+export default function AboutPage({ onStart }) {
   return (
     <div className="about-page">
       <section className="about-hero">
-        <Logo variant="full" height={92} className="about-logo" />
+        <span className="hero-eyebrow"><span className="dot" /> About GUUT Forms</span>
         <h1>Forms shouldn't start from a blank grid.</h1>
         <p className="about-lede">
           GUUT Forms is built on the same principle behind everything GUUT makes:
@@ -64,13 +63,18 @@ export default function AboutPage() {
       <section className="about-block">
         <h2>What makes it different</h2>
         <ul className="about-list">
-          <li><span className="dot" /> One page per form: build, preview, and read responses without switching screens.</li>
-          <li><span className="dot" /> A shareable link the moment you publish, no separate distribution step.</li>
-          <li><span className="dot" /> Token usage visible and capped per query, so AI generation stays predictable to run.</li>
-          <li><span className="dot" /> Built on MongoDB from the start, so responses are queryable data, not a file to reconcile later.</li>
+          <li><span className="dot" /> Build, preview and read responses on one page per form, without switching tools.</li>
+          <li><span className="dot" /> A shareable link the moment you publish, plus an embed code and a single HTML file for anywhere else.</li>
+          <li><span className="dot" /> Responses turn into charts and plain-language insights you can act on, not a spreadsheet to clean up.</li>
+          <li><span className="dot" /> Business accounts can keep every response in their own database.</li>
         </ul>
       </section>
 
+      <section className="about-cta">
+        <h2>Try it on a form you need this week</h2>
+        <p>Free for individuals. Add your team when you are ready.</p>
+        {onStart && <button className="primary big-btn" onClick={onStart}>Start free</button>}
+      </section>
       <p className="about-footer">GUUT Forms, part of the GUUT platform.</p>
     </div>
   );

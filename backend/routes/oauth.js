@@ -12,6 +12,7 @@ import { mailEnabled } from "../utils/mailer.js";
 import { appUrl } from "../utils/mailer.js";
 import { httpError } from "../utils/http.js";
 import { logger } from "../utils/logger.js";
+import { funnel } from "../utils/funnel.js";
 
 // "Continue with Google / Microsoft / Apple". Standard OpenID Connect authorization-code flow, no extra
 // packages. Each provider is switched on by its environment variables (see SETUP.md, Sign-in providers):
@@ -231,6 +232,7 @@ async function finish(req, res, id) {
       }));
       user.passwordSet = false;
       created = true;
+      funnel("signup_done", req, { ownerId: String(user._id), type: intent.type || "individual", via: id });
       if (mustVerify) {
         await user.save();
         await issueVerification(user);

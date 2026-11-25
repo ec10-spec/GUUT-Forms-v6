@@ -89,7 +89,7 @@ export default function AiSuggestions({ title, description, fields, onConfirm, o
             })
           }
         >
-          Add {includedCount} field{includedCount === 1 ? "" : "s"} to form
+          Add {includedCount} question{includedCount === 1 ? "" : "s"} to form
         </button>
       </div>
     </div>

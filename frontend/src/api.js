@@ -100,9 +100,11 @@ export const api = {
     return `${BASE}/auth/oauth/${provider}/start${q ? `?${q}` : ""}`;
   },
 
+  funnelSummary: () => request("/funnel/summary"),
+
   // GUUT AI assistant
   assistantStatus: () => request("/assistant/status"),
-  assistantChat: (payload) => request("/assistant/chat", json("POST", { tz: tz(), ...payload })),
+  assistantChat: (payload, signal) => request("/assistant/chat", { ...json("POST", { tz: tz(), ...payload }), signal }),
   assistantChats: () => request("/assistant/chats"),
   assistantChatGet: (id) => request(`/assistant/chats/${id}`),
   assistantChatRename: (id, title) => request(`/assistant/chats/${id}`, json("PATCH", { title })),

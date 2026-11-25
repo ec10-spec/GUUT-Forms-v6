@@ -1,6 +1,9 @@
 import React from "react";
 import Logo from "./Logo.jsx";
 import Icon from "./Icon.jsx";
+import { openReport } from "./ReportWidget.jsx";
+
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || "");
 
 const ROLE_LABEL = { superadmin: "Platform team", admin: "Company admin", user: null };
 
@@ -34,7 +37,7 @@ export default function Sidebar({ user, route, open, onClose, onNavigate, onNewF
               <Icon name="plus" /> New form
             </button>
             <button className="side-search" onClick={() => { onSearch(); onClose(); }}>
-              <Icon name="search" /><span>Search</span><kbd>Ctrl K</kbd>
+              <Icon name="search" /><span>Search</span><kbd>{isMac ? "\u2318K" : "Ctrl K"}</kbd>
             </button>
 
             <nav className="side-nav">
@@ -53,7 +56,10 @@ export default function Sidebar({ user, route, open, onClose, onNavigate, onNewF
               {item("/settings", "settings", "Settings", on("settings"))}
               {item("/about", "about", "About", on("about"))}
             </nav>
-            <a className="side-legal" href="#/privacy">Privacy policy</a>
+            <div className="side-legal">
+              <button type="button" onClick={() => { onClose(); openReport(); }}>Report a problem</button>
+              <a href="#/privacy">Privacy policy</a>
+            </div>
 
             <div className="side-user">
               <span className="avatar">{(user.name || user.email || "?")[0].toUpperCase()}</span>

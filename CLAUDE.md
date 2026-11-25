@@ -24,12 +24,15 @@ MERN app: `backend/` (Express, Mongoose, ES modules) and `frontend/` (React, Vit
 - Sign-in providers: `routes/oauth.js` (Google, Microsoft, Apple; OIDC code flow, state + cookie nonce, 2-minute ticket swapped at `/exchange`). `User.oauth.<provider>` holds the provider's id; `User.passwordSet` false = no password yet.
 - Team reviewers: `Team.members[].role` (member, reviewer); `FormIndex.review` (status none, requested, approved, changes_requested); routes in `routes/sharing.js`.
 - Pricing: Freemium, Teams (`starter`), Servers (`scale`); `growth` retired. `POST /api/auth/upgrade` turns an individual workspace into a business.
+- First run (v14): signed-out `#/` is `LandingPage.jsx`; `#/signin`, `#/signup`, `#/example` (sample form, `FormRenderer demo`). Funnel events: `utils/funnel.js`, `routes/funnel.js` (browser events allow-listed), summary in Platform admin.
+- Builder (v14): one header action (Publish / Publish changes + Discard), drafts autosave, new forms are created once they have a question and keep the same builder when their address becomes `#/edit/<id>` (App.jsx `promoted`). Review is `ReviewBar.jsx` (exports the chip). `ShareSheet.jsx` after the first publish. Report a problem opens with `openReport()`; there is no floating button.
 - Frontend: hash routing in `App.jsx`, sidebar in `components/Sidebar.jsx`, logo in `components/Logo.jsx` (CSS variables `--logo-ink`, `--logo-sub`, `--logo-dot`).
 
 ## Rules
 - Portability: avoid `$pull`, `$dateToString`, `$max` and grouped `$sum:1` in Mongo queries; aggregate in JS.
 - Never store form answers in notification emails (counts and links only).
 - No emojis or em dashes in UI text or docs.
+- Wrap new page areas in `ErrorBoundary` when they load data or are lazy-loaded.
 
 ## Deferred
 Dynamic routing, submission status tracking, workflow automation. Real SMTP and real AI key paths are untested against live services (see SETUP.md go-live checklist).

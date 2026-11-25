@@ -94,7 +94,8 @@ function FilePicker({ form, field, value, onChange, previewOnly, describedBy }) 
  * light palette (not the viewer's dark mode), so the owner's colours look the way they were chosen.
  * fullPage: the page background is painted by the caller (public page), so no coloured band here.
  */
-export default function FormRenderer({ form, onSubmitted, previewOnly = false, fullPage = false, hideBranding = true }) {
+// demo: a sample form (landing page, #/example): answers are checked like a real form, nothing is sent.
+export default function FormRenderer({ form, onSubmitted, previewOnly = false, fullPage = false, hideBranding = true, demo = false, demoNote = null }) {
   const [answers, setAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -131,6 +132,7 @@ export default function FormRenderer({ form, onSubmitted, previewOnly = false, f
       document.getElementById(`q_${errors[0].fieldId}`)?.focus?.();
       return;
     }
+    if (demo) { setDone(true); onSubmitted?.(clean); return; }
     setSubmitting(true);
     try {
       await api.submit(form._id, clean);
@@ -151,7 +153,8 @@ export default function FormRenderer({ form, onSubmitted, previewOnly = false, f
         <div className="form-renderer thank-you">
           {header && <img className="form-header-image" src={header} alt="" />}
           <h1>{form.title}</h1>
-          <p className="submitted-message" style={{ color: accent }}>Thanks, your response was recorded.</p>
+          <p className="submitted-message" style={{ color: accent }}>{demo ? "This is what respondents see after they submit. Nothing was sent: this is a sample form." : "Thanks, your response was recorded."}</p>
+          {demo && demoNote}
           <button type="button" className="secondary" onClick={() => { setAnswers({}); setFieldErrors({}); setDone(false); }}>Submit another response</button>
           {!hideBranding && <a className="thanks-brand" href="/"><Logo variant="mark" height={16} /> Made with GUUT Forms</a>}
         </div>

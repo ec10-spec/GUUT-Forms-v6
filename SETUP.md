@@ -55,6 +55,35 @@ Vercel expects the Pro plan ($20 per user per month). Check Vercel's fair use te
 
 ---
 
+## v14 changes: first-run experience (UX audit fixes)
+
+- **Landing page.** Signed-out visitors now see a product page at `#/` (live sample form, how it works, Start free).
+  Sign in is at `#/signin`, sign up at `#/signup`, and the sample form at `#/example` (nothing is sent from it).
+  A description typed on the landing page is carried through sign-up and drafted right after (when AI is ready).
+- **Sign-up** starts as a free personal account with Google, Microsoft and Apple first; business accounts and
+  "join my company" are links under the form. Provider logos: drop each provider's official artwork into
+  `frontend/public/brand/google.svg`, `microsoft.svg`, `apple.svg` (missing files are skipped).
+- **Forms home.** New accounts get one start screen (describe it, 6 templates, or blank). With forms, the list
+  comes first; cards show response counts, "+N new", the last response time and a menu (Open, Copy link, Duplicate, Delete).
+- **Builder.** Drafts save automatically (a new form is created once it has a question). One primary button in
+  the header: Publish, or Publish changes plus Discard on a live form. After the first publish a sheet shows the
+  link, an embed code and the HTML download. Review status is a chip beside Live/Draft. "+ Add question" replaces
+  the row of type buttons. When the page is narrow (for example with GUUT AI open), questions are edited in place.
+  The embed code works on Vercel; on Render, Express sends `X-Frame-Options: SAMEORIGIN`, so embedding needs a change there.
+- **One AI assistant.** The old "AI assistant" tab under Responses is now part of GUUT AI (answer length, "Read sample
+  answers", one-click analyses under Charts, old chats in GUUT AI's history). GUUT AI docks from 1024 px wide;
+  below that it is a sheet that never opens by itself. Without a key there is only the launcher. Ctrl/Cmd+J toggles it.
+  It can be stopped mid-answer, retried, and replies can be copied; proposals from older chats can't be applied blindly.
+- **Report a problem** is no longer a floating button: it is in the sidebar, the GUUT AI menu and page footers.
+- **Errors** in one part of a page no longer blank the app (error boundaries; crashes are logged as client errors).
+- **Explore** cards show a form's first questions and offer "Fill it in" and "Use as template" (signed-out visitors
+  sign up first, then the copy is made). Forms listed before v14 show their questions after their next save.
+- **Funnel.** Platform admin, Funnel tab: landing views, sign-ups, first form, first publish, first response
+  (7 and 30 days). Stored as `funnel` log entries, no form content.
+- **Settings.** The AI model and "Longest form draft" (the old token limit) moved under AI, Advanced.
+
+---
+
 ## v13 changes: GUUT AI, Google / Microsoft / Apple sign-in, team reviewers, privacy policy, new pricing
 
 ### GUUT AI (the assistant beside every page)

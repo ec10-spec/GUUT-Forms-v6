@@ -1,4 +1,5 @@
 import React from "react";
+import { openReport } from "./ReportWidget.jsx";
 
 // Privacy policy. Plain language, written to match what the app actually does today.
 // DRAFT: have it reviewed before launch, and update it whenever a new service starts handling data.
@@ -80,6 +81,7 @@ export function LegalFooter() {
       <a href="#/privacy">Privacy policy</a>
       <a href="#/pricing">Pricing</a>
       <a href="#/about">About</a>
+      <button type="button" className="link-quiet" onClick={() => openReport()}>Report a problem</button>
     </footer>
   );
 }

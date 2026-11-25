@@ -21,6 +21,11 @@ import ApprovalsPage from "./components/ApprovalsPage.jsx";
 import ResetPassword from "./components/ResetPassword.jsx";
 import PrivacyPage, { LegalFooter } from "./components/PrivacyPage.jsx";
 import GuutAssistant from "./components/GuutAssistant.jsx";
+import LandingPage from "./components/LandingPage.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import { openReport } from "./components/ReportWidget.jsx";
+import { SAMPLE_FORM } from "./lib/sampleForm.js";
+import { track } from "./lib/funnel.js";
 import { api, getUser, getToken, saveUser, saveSession, clearSession } from "./api.js";
 import { confirmLeave } from "./lib/navGuard.js";
 
@@ -38,6 +43,9 @@ function parseHash(hash) {
   if (h === "/pricing") return { name: "pricing" };
   if (h === "/approvals") return { name: "approvals" };
   if (h === "/privacy") return { name: "privacy" };
+  if (h === "/signin") return { name: "signin" };
+  if (h === "/signup") return { name: "signup" };
+  if (h === "/example") return { name: "example" };
   if (h.startsWith("/oauth?")) return { name: "oauth", params: Object.fromEntries(new URLSearchParams(h.slice(7))) };
   const joinMatch = h.match(/^\/join\/([A-Za-z0-9-]{4,24})$/);
   if (joinMatch) return { name: "join", code: joinMatch[1] };
@@ -150,7 +158,7 @@ function FormNotFound({ message }) {
         <Logo variant="horizontal" height={30} />
         <h1>{message === "Form not found" || !message ? "This form isn't available" : message}</h1>
         <p>The link may be mistyped, or the form was unpublished or deleted. Check with the person who sent it.</p>
-        <a className="primary btn-link solid" href="#/explore">Go to GUUT Forms</a>
+        <a className="primary btn-link solid" href="#/">Go to GUUT Forms</a>
       </div>
       <ReportWidget />
     </div>
@@ -206,15 +214,38 @@ function PublicFormPage({ id, user, onSaveTemplate }) {
           </div>
         )}
         <FormRenderer form={form} fullPage hideBranding={!!form.hideBranding} />
-        {!form.hideBranding && (
-          <div className="public-foot">
-            <a href="/" aria-label="Made with GUUT Forms">
-              <Logo variant="mark" height={18} /> Made with GUUT Forms
+        <div className="public-foot">
+          {!form.hideBranding && (
+            <a className="made-with" href="/?ref=form#/" onClick={() => track("made_with_click")} aria-label="Made with GUUT Forms. Make your own form">
+              <Logo variant="mark" height={16} /> Made with GUUT Forms
             </a>
-          </div>
-        )}
+          )}
+          <button type="button" className="link-quiet" onClick={() => openReport("form")}>Report a problem with this form</button>
+        </div>
       </div>
       <ReportWidget />
+    </div>
+  );
+}
+
+/** #/signin or #/signup while already signed in: go to Forms. */
+function SignedInRedirect({ onGo }) {
+  useEffect(() => { onGo(); }, [onGo]);
+  return null;
+}
+
+/** #/example: the sample form, full page, as a respondent would see it. Nothing is sent. */
+function ExampleFormPage({ onStart }) {
+  useEffect(() => { track("example_view"); }, []);
+  return (
+    <div className="public-page" style={{ background: SAMPLE_FORM.theme.backgroundColor }}>
+      <div className="example-bar">
+        <span><strong>This is a sample form.</strong> Try it: nothing is sent.</span>
+        <button className="primary small" onClick={onStart}>Make your own, free</button>
+      </div>
+      <div className="app-shell public-form-shell">
+        <FormRenderer form={SAMPLE_FORM} fullPage demo hideBranding demoNote={<button className="primary" onClick={onStart}>Make one like this, free</button>} />
+      </div>
     </div>
   );
 }
@@ -327,19 +358,36 @@ export default function App() {
     setRoute(parseHash(`#${hash}`));
   }
 
-  function startBlankForm() {
-    pendingDraft.current = { title: "Untitled Form", description: "", fields: [], source: "manual", generationPrompt: null };
+  function openDraft(draft) {
+    pendingDraft.current = draft;
     setDraftKey((k) => k + 1);
     navigate("/new");
+  }
+  function startBlankForm() {
+    openDraft({ title: "Untitled Form", description: "", fields: [], source: "manual", generationPrompt: null });
+  }
+  // A new form that was just saved keeps the same builder (no remount) when its address becomes #/edit/<id>.
+  const promoted = useRef(null);
+
+  // After signing in or up: finish what the visitor started while signed out (a template copy from Explore).
+  async function afterAuth(u) {
+    setUser(u);
+    let copyId = null;
+    try { copyId = sessionStorage.getItem("guut_pending_copy"); sessionStorage.removeItem("guut_pending_copy"); } catch { /* ignore */ }
+    if (copyId && u?.companyId) {
+      try { const copy = await api.duplicateForm(copyId); setActiveForm(copy); navigate(`/edit/${copy._id}`); return; } catch { /* fall through to Forms */ }
+    }
+    navigate("/");
   }
 
   function logout() {
     clearSession();
     setUser(null);
-    navigate("/explore");
+    navigate("/");
   }
 
   // Public form fill opens standalone (no app chrome).
+  if (route.name === "example") return <ExampleFormPage onStart={() => navigate(user ? "/" : "/signup")} />;
   if (route.name === "public") {
     return (
       <PublicFormPage
@@ -352,11 +400,12 @@ export default function App() {
 
   const inWorkspace = route.name === "new" || route.name === "edit";
   // The email-confirmation link must work for someone who is not signed in yet.
-  const isPublicRoute = ["about", "explore", "verify", "pricing", "reset", "forgot", "privacy", "oauth"].includes(route.name);
+  const isPublicRoute = ["about", "explore", "verify", "pricing", "reset", "forgot", "privacy", "oauth", "signin", "signup"].includes(route.name);
   const isBusiness = user?.company?.type === "business";
   const isCompanyAdmin = isBusiness && user?.role === "admin";
   const waiting = ["pending", "declined"].includes(user?.membership?.status) && !user?.companyId;
   const needsAuth = !isPublicRoute; // home / new / edit / settings require a login
+  const landing = route.name === "home" && !user; // signed-out visitors get the product page, not a login box
 
   const pages = [
     { hash: "/", label: "Forms", icon: "forms" },
@@ -384,11 +433,12 @@ export default function App() {
           <header className="mobile-bar">
             <button className="icon-btn" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Icon name="menu" size={22} /></button>
             <button className="mobile-brand" onClick={() => navigate(user ? "/" : "/explore")} aria-label="GUUT Forms home"><Logo variant="horizontal" height={26} /></button>
-            {user ? <button className="icon-btn" onClick={() => setPaletteOpen(true)} aria-label="Search"><Icon name="search" size={20} /></button> : <button className="primary small" onClick={() => navigate("/")}>Sign in</button>}
+            <button className="icon-btn" onClick={() => setPaletteOpen(true)} aria-label="Search"><Icon name="search" size={20} /></button>
           </header>
         )}
         <div className="app-shell">
       <main>
+        <ErrorBoundary resetKey={`${route.name}:${route.id || ""}`} area="page">
         {user && user.companyId && user.membership?.status === "pending" && (
           <div className="info-banner">
             <span>Your request to join {user.pendingCompanyName || "a company"} is waiting for an admin to approve it.</span>
@@ -398,18 +448,22 @@ export default function App() {
         {route.name === "oauth" ? (
           <OAuthReturn
             params={route.params}
-            onAuth={(u) => { setUser(u); leaveOAuth("/"); }}
-            onError={(message) => { clearSession(); setUser(null); leaveOAuth("/", { error: message, at: Date.now() }); }}
+            onAuth={(u) => { leaveOAuth("/"); afterAuth(u); }}
+            onError={(message) => { clearSession(); setUser(null); leaveOAuth("/signin", { error: message, at: Date.now() }); }}
             onDone={(hash) => leaveOAuth(hash)}
           />
         ) : route.name === "join" ? (
           user && !waiting ? (
             <JoinCompany code={route.code} user={user} onUser={setUser} onDone={() => navigate("/")} />
           ) : (
-            <AuthPage key={`join-${route.code}`} joinCode={route.code} onAuth={(u) => { setUser(u); navigate("/"); }} />
+            <AuthPage key={`join-${route.code}`} joinCode={route.code} onAuth={afterAuth} />
           )
-        ) : needsAuth && !user ? (
-          <AuthPage key={JSON.stringify(authInitial)} initial={authInitial} onAuth={(u) => { setUser(u); navigate("/"); }} />
+        ) : landing ? (
+          <LandingPage onStart={() => navigate("/signup")} onExample={() => navigate("/example")} />
+        ) : (route.name === "signin" || route.name === "signup") && user ? (
+          <SignedInRedirect onGo={() => navigate("/")} />
+        ) : route.name === "signin" || route.name === "signup" || (needsAuth && !user) ? (
+          <AuthPage key={`${route.name}-${JSON.stringify(authInitial)}`} initial={{ mode: route.name === "signup" ? "create" : "signin", ...authInitial }} onAuth={afterAuth} />
         ) : waiting ? (
           <PendingApproval user={user} onUser={setUser} onLogout={logout} />
         ) : (
@@ -417,7 +471,7 @@ export default function App() {
             {route.name === "home" && (
               <Home
                 user={user}
-                onOpenDraft={(draft) => { pendingDraft.current = draft; navigate("/new"); }}
+                onOpenDraft={openDraft}
                 onOpenForm={(f) => navigate(`/edit/${f._id}`)}
               />
             )}
@@ -425,19 +479,20 @@ export default function App() {
             {route.name === "explore" && (
               <ExplorePage
                 onOpenPublic={(id) => navigate(`/f/${id}`)}
+                onSignup={() => navigate("/signup")}
                 user={user}
                 onSaveTemplate={(copy) => { setActiveForm(copy); navigate(`/edit/${copy._id}`); }}
               />
             )}
 
-            {route.name === "about" && <AboutPage />}
+            {route.name === "about" && <AboutPage onStart={() => navigate(user ? "/" : "/signup")} />}
 
             {route.name === "privacy" && <PrivacyPage />}
 
             {route.name === "pricing" && (
               <PricingPage user={user} onUser={setUser} onChoose={(kind, plan) => {
                 if (user) { navigate(user.role === "admin" && user.company?.type === "business" ? "/admin" : "/"); return; }
-                setAuthInitial({ mode: "create", type: kind, plan }); navigate("/");
+                setAuthInitial({ type: kind, plan }); navigate("/signup");
               }} />
             )}
 
@@ -465,42 +520,43 @@ export default function App() {
               <SettingsPage key={route.tab || "settings"} initialTab={route.tab} user={user} onUserUpdated={(u) => setUser(u)} />
             )}
 
-            {route.name === "new" && (
-              pendingDraft.current ? (
+            {(route.name === "new" || route.name === "edit") && (() => {
+              if (route.name === "new" && !pendingDraft.current) {
+                return (
+                  <div className="empty-hint">
+                    <p>Nothing to build yet.</p>
+                    <button className="primary" onClick={() => navigate("/")}>Start a new form</button>
+                  </div>
+                );
+              }
+              const isNew = route.name === "new";
+              if (!isNew && (loadingActiveForm || !activeForm || activeForm._id !== route.id)) return <p className="empty-hint">Loading...</p>;
+              const key = isNew ? `new-${draftKey}` : promoted.current?.id === route.id ? promoted.current.key : `edit-${route.id}`;
+              return (
                 <FormBuilder
-                  key={draftKey}
-                  draft={pendingDraft.current}
-                  formId={null}
-                  onSaved={(saved) => { setActiveForm(saved); navigate(`/edit/${saved._id}`); }}
+                  key={key}
+                  draft={isNew ? pendingDraft.current : activeForm}
+                  formId={isNew ? null : activeForm._id}
+                  onSaved={(saved) => {
+                    setActiveForm(saved);
+                    if (isNew) { promoted.current = { id: saved._id, key }; navigate(`/edit/${saved._id}`); }
+                  }}
                 />
-              ) : (
-                <div className="empty-hint">
-                  <p>Nothing to build yet.</p>
-                  <button className="primary" onClick={() => navigate("/")}>Start a new form</button>
-                </div>
-              )
-            )}
-
-            {route.name === "edit" && (
-              loadingActiveForm || !activeForm ? (
-                <p>Loading...</p>
-              ) : (
-                <FormBuilder draft={activeForm} formId={activeForm._id} onSaved={(saved) => setActiveForm(saved)} />
-              )
-            )}
+              );
+            })()}
           </>
         )}
+        </ErrorBoundary>
       </main>
 
-      {!user && ["about", "explore", "pricing", "privacy"].includes(route.name) && <LegalFooter />}
+      {!user && ["home", "about", "explore", "pricing", "privacy", "signin", "signup"].includes(route.name) && <LegalFooter />}
       <ReportWidget />
         </div>
       </div>
       {showSidebar && (
-        <GuutAssistant
-          user={user} route={route} builder={builderState} onNavigate={navigate}
-          onOpenDraft={(draft) => { pendingDraft.current = draft; setDraftKey((k) => k + 1); navigate("/new"); }}
-        />
+        <ErrorBoundary variant="inline" area="assistant" title="GUUT AI ran into a problem.">
+          <GuutAssistant user={user} route={route} builder={builderState} onNavigate={navigate} onOpenDraft={openDraft} />
+        </ErrorBoundary>
       )}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} pages={pages} onGo={navigate} />
     </div>

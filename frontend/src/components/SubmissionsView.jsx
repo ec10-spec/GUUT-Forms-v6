@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useEffect, useState } from "react";
 import { api, assetUrl } from "../api.js";
 import Icon from "./Icon.jsx";
 import ImportModal from "./ImportModal.jsx";
+import ErrorBoundary from "./ErrorBoundary.jsx";
 import { ANALYSES, askGuutAi } from "../lib/guutAi.js";
 
 // Charts load only when someone opens that tab. AI questions go to GUUT AI (the panel beside the page).
@@ -95,11 +96,10 @@ export default function SubmissionsView({ form }) {
       {view === "charts" && (
         <div className="ask-ai-bar">
           <span className="ask-ai-label"><Icon name="spark" /> Ask GUUT AI</span>
-          {ANALYSES.map(([label, prompt]) => <button key={label} className="template-chip" onClick={() => askGuutAi(prompt, { send: true })}>{label}</button>)}
+          {ANALYSES.map(([label, prompt]) => <button key={label} className="chip ask-chip" onClick={() => askGuutAi(prompt, { send: true })}>{label}</button>)}
         </div>
       )}
-      {view === "charts" && <Suspense fallback={<p className="empty-hint">Loading charts...</p>}><AnalyticsView form={form} /></Suspense>}
-      {/* The assistant stays mounted after its first open, so a conversation in progress isn't lost. */}
+      {view === "charts" && <ErrorBoundary variant="inline" area="charts" title="The charts didn't load."><Suspense fallback={<p className="empty-hint">Loading charts...</p>}><AnalyticsView form={form} /></Suspense></ErrorBoundary>}
 
       {view === "table" && (
         <>
@@ -137,7 +137,7 @@ export default function SubmissionsView({ form }) {
           {loading ? (
             <p>Loading...</p>
           ) : submissions.length === 0 ? (
-            <p className="empty-hint">No responses yet. Share the form link to start collecting them.</p>
+            q.trim() ? <p className="empty-hint">No responses match that search.</p> : <NoResponses form={form} />
           ) : (
             <div className="table-scroll">
               <table className="resp-table">
@@ -161,6 +161,30 @@ export default function SubmissionsView({ form }) {
         </>
       )}
       {importOpen && <ImportModal form={form} onClose={() => setImportOpen(false)} onImported={() => load()} />}
+    </div>
+  );
+}
+
+/** Empty responses: what to do next, right here (copy the link, or open the form to send a test response). */
+function NoResponses({ form }) {
+  const [copied, setCopied] = useState(false);
+  const live = !!form.publishedAt;
+  const url = api.shareUrl(form._id);
+  return (
+    <div className="empty-state compact">
+      <h3>No responses yet</h3>
+      {live ? (
+        <>
+          <p>Send the link to people, or open the form and send a test response yourself.</p>
+          <div className="copy-row">
+            <input readOnly value={url} onFocus={(e) => e.target.select()} aria-label="Form link" />
+            <button className="primary" onClick={() => { try { navigator.clipboard?.writeText(url); } catch { /* blocked */ } setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy link"}</button>
+          </div>
+          <a className="btn-link" href={url} target="_blank" rel="noreferrer">Open the form in a new tab</a>
+        </>
+      ) : (
+        <p>Publish the form (top right) to get a link people can answer.</p>
+      )}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { funnel } from "../utils/funnel.js";
 import express, { Router } from "express";
 import mongoose from "mongoose";
 import FormIndex, { syncIndex } from "../models/FormIndex.js";
@@ -61,6 +62,7 @@ router.post("/", requireAuth, withTenant, async (req, res) => {
   await recordFormSize(req.tenant, req.user.companyId, form);
   logger.info("form", `Form created: ${form.title}`, { req, meta: { formId: form._id, db: req.tenant.mode } });
   notifyFormCreated({ form, companyId: req.user.companyId, creator: req.user });
+  if ((await FormIndex.countDocuments({ ownerId: req.userId }, { limit: 2 })) === 1) funnel("first_form_created", req, { ownerId: req.userId });
   res.status(201).json(withAccess(form, "owner"));
 });
 
@@ -108,12 +110,32 @@ router.get("/", requireAuth, withTenant, async (req, res) => {
   }
   forms.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
+  // Response count and latest response per form, for the cards. One count and one lookup per form, each in
+  // that form's own database (no grouped $sum, see CLAUDE.md). Skipped for very long lists.
+  const stats = new Map();
+  if (forms.length <= 200) {
+    const tenantOf = new Map([[String(req.user.companyId), req.tenant]]);
+    const companyOfForm = new Map([...own, ...outside].map((i) => [String(i._id), String(i.companyId)]));
+    await Promise.all(forms.map(async (f) => {
+      const cid = companyOfForm.get(String(f._id)) || String(req.user.companyId);
+      try {
+        let t = tenantOf.get(cid);
+        if (!t) { t = await tenantForCompanyId(cid); tenantOf.set(cid, t); }
+        const [count, last] = await Promise.all([
+          t.Submission.countDocuments({ formId: f._id }),
+          t.Submission.findOne({ formId: f._id }).sort({ createdAt: -1 }).select("createdAt").lean(),
+        ]);
+        stats.set(String(f._id), { responseCount: count, lastResponseAt: last?.createdAt || null });
+      } catch { /* that database is unreachable right now */ }
+    }));
+  }
+
   const otherOwners = [...new Set([...ownerIdOf.values()].filter((o) => o !== req.userId && mongoose.isValidObjectId(o)))];
   const owners = new Map((await User.find({ _id: { $in: otherOwners } }).select("name email")).map((u) => [String(u._id), u.name || u.email]));
   res.json(forms.map((f) => {
     const owner = ownerIdOf.get(String(f._id)) ?? f.ownerId;
     const myAccess = owner === req.userId ? "owner" : shared.get(String(f._id)) || (isAdmin ? "admin" : null);
-    return { ...f, myAccess, ownerName: owner === req.userId ? null : owners.get(owner) || null, listingStatus: listingOf.get(String(f._id)) || "none" };
+    return { ...f, myAccess, ownerName: owner === req.userId ? null : owners.get(owner) || null, listingStatus: listingOf.get(String(f._id)) || "none", ...(stats.get(String(f._id)) || {}) };
   }));
 });
 
@@ -122,7 +144,7 @@ router.get("/", requireAuth, withTenant, async (req, res) => {
 router.get("/public", async (req, res) => {
   const filter = { isPublic: true, publishedAt: { $ne: null } };
   if (req.query.q) filter.title = { $regex: escapeRegex(req.query.q), $options: "i" };
-  res.json(await FormIndex.find(filter).select("title description fieldCount publishedAt").sort({ publishedAt: -1 }).limit(100));
+  res.json(await FormIndex.find(filter).select("title description fieldCount preview publishedAt").sort({ publishedAt: -1 }).limit(100));
 });
 
 // Fetch one form. Published forms are public (that's what a share link opens);
@@ -185,9 +207,11 @@ router.put("/:id", requireAuth, async (req, res) => {
 router.post("/:id/publish", requireAuth, async (req, res) => {
   const { idx, tenant } = await locate(req.params.id);
   const access = assertAccess(req, idx, canEdit, "You have view-only access to this form.");
+  const wasPublished = !!idx.publishedAt;
   const updated = await tenant.Form.findByIdAndUpdate(req.params.id, { publishedAt: new Date() }, { new: true });
   if (!updated) throw httpError(404, "Form not found");
   await syncIndex(updated, idx.companyId);
+  if (!wasPublished && (await FormIndex.countDocuments({ ownerId: idx.ownerId, publishedAt: { $ne: null } }, { limit: 2 })) === 1) funnel("first_publish", req, { ownerId: idx.ownerId });
   logger.info("form", `Form published: ${updated.title}`, { req, meta: { formId: updated._id } });
   res.json(withAccess(updated, access));
 });

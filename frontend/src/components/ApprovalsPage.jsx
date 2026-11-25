@@ -51,7 +51,7 @@ export default function ApprovalsPage({ onCount }) {
           <div key={l.formId} className="approval-row">
             <div>
               <strong>{l.title}</strong>
-              <span>{l.fieldCount} fields{l.requestedBy ? `, requested by ${l.requestedBy.name || l.requestedBy.email}` : ""}{l.requestedAt ? `, ${when(l.requestedAt)}` : ""}</span>
+              <span>{l.fieldCount} {l.fieldCount === 1 ? "question" : "questions"}{l.requestedBy ? `, requested by ${l.requestedBy.name || l.requestedBy.email}` : ""}{l.requestedAt ? `, ${when(l.requestedAt)}` : ""}</span>
               {l.description && <span className="approval-desc">{l.description}</span>}
             </div>
             <div className="approval-actions">

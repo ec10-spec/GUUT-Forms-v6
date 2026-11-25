@@ -41,15 +41,17 @@ const PAGES = {
 };
 
 const GUIDE = `How GUUT Forms works (use this to answer "how do I" questions; do not invent features):
-- Forms page: every form you own or that is shared with you. "New form" starts a blank form; describing a form lets AI draft one. Templates are on the Forms page.
-- Builder tabs: Build (questions, drag to reorder, conditional logic "show only if"), Design (colours, header image), Responses (table, CSV and PDF export, import older responses from CSV or Excel), Analysis (charts and the analysis chat for that form).
-- Publish makes the share link work. "List on Explore" puts a published form in the public repository (business accounts need an admin's approval). A form can be downloaded as a standalone HTML file.
-- Share (in the builder): give a person or a whole team viewer or editor access. Editors can edit and publish; only the owner or a company admin can delete or manage sharing.
-- Teams (sidebar): named groups. Business teams stay inside the company; teams made by individuals can include anyone with an account. A team member can be a Member or a Reviewer. Editors can ask a team's reviewers to review a form ("Request review" in the builder); reviewers approve it or ask for changes.
+- Forms page: every form you own or that is shared with you, with response counts. A "Describe a form" bar drafts a form with AI; templates are below it and under "Templates". The sidebar "New form" starts a blank form.
+- Builder: tabs Build (questions, "+ Add question", drag to reorder, "Show this question only if" logic), Design (colours, header image), Preview, Responses (table, search and filters, CSV and PDF export, import older responses from CSV or Excel, and Charts and analysis with one-click "Ask GUUT AI" analyses).
+- Saving: drafts save automatically. "Publish" (top right) makes the form live and shows the link, an embed code and a download as one HTML file. On a live form, edits stay private until "Publish changes"; "Discard" goes back to the live version.
+- Share (top right): copy the link, download as HTML, list the form on Explore (business accounts need an admin's approval), and give a person or a whole team viewer or editor access. Editors can edit and publish; only the owner or a company admin can delete or manage sharing.
+- Teams (sidebar): named groups. Business teams stay inside the company; teams made by individuals can include anyone with an account. A team member can be a Member or a Reviewer. Editors ask a team's reviewers with the review chip beside the form's status; reviewers approve or ask for changes. Review never blocks publishing.
+- Explore: public forms anyone can fill in, or "Use as template" to copy one.
 - Notifications (Settings): emails when a form is created (admins), when responses arrive (every response, every N hours or every N responses), and for access requests.
-- AI: everyone uses their own Claude or ChatGPT key, saved in Settings, AI. Usage and token counts are under Settings, Usage.
-- Plans: Freemium ($0, individuals, up to 10 forms), Teams ($29 a month, up to 10 people, team admin and invites, activity logs; upgrade from Pricing without a new account), Servers (contact us; your own install and database). Prices are placeholders.
-- Sign in with email and password, or with Google, Microsoft or Apple when they are set up. Connect or disconnect them in Settings, Account, Sign-in methods; accounts made with them can set a password there too.`;
+- AI: everyone uses their own Claude or ChatGPT key, saved in Settings, AI. Usage is under Settings, Usage. GUUT AI history can be switched off in its options menu.
+- Plans: Freemium ($0, individuals, up to 10 forms), Teams ($29 a month, up to 10 people; upgrade from Pricing without a new account), Servers (contact us; your own install and database). Prices are placeholders.
+- Sign in with email and password, or with Google, Microsoft or Apple when they are set up. Connect or disconnect them in Settings, Account; accounts made with them can set a password there too.
+- Problems: "Report a problem" is in the sidebar and in GUUT AI's options menu.`;
 
 const SYSTEM = `You are GUUT AI, the assistant built into GUUT Forms, a form builder. You help the person get things done in the app.
 

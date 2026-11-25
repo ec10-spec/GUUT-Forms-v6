@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from "react";
+import ErrorBoundary from "./ErrorBoundary.jsx";
 import { api } from "../api.js";
 import { TeamUsage } from "./UsageViews.jsx";
 import { JoinPanel, Billing } from "./JoinAndBilling.jsx";
@@ -14,7 +15,7 @@ const PlatformAdmin = lazy(() => import("./PlatformAdmin.jsx"));
  */
 export default function AdminPage({ currentUser }) {
   return currentUser.role === "superadmin"
-    ? <Suspense fallback={<p className="empty-hint">Loading...</p>}><PlatformAdmin currentUser={currentUser} /></Suspense>
+    ? <ErrorBoundary variant="inline" area="platform-admin" title="This admin view didn't load."><Suspense fallback={<p className="empty-hint">Loading...</p>}><PlatformAdmin currentUser={currentUser} /></Suspense></ErrorBoundary>
     : <CompanyAdmin currentUser={currentUser} />;
 }
 

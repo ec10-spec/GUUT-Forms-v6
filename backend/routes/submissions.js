@@ -1,3 +1,5 @@
+import { funnel } from "../utils/funnel.js";
+import { background } from "../utils/background.js";
 import { Router } from "express";
 import PDFDocument from "pdfkit";
 import rateLimit from "express-rate-limit";
@@ -92,6 +94,9 @@ router.post("/:formId", submitLimiter, async (req, res) => {
   if (fileIds.length) await tenant.conn.db.collection("uploads.files").updateMany({ _id: { $in: fileIds } }, { $set: { "metadata.submissionId": String(submission._id) } });
   await bumpStorage(idx.companyId, size);
   notifyResponse(idx); // best effort, never blocks or fails the respondent
+  background(tenant.Submission.countDocuments({ formId: form._id, imported: { $ne: true } }, { limit: 2 }).then((n) => {
+    if (n === 1) funnel("first_response", req, { ownerId: idx.ownerId, formId: String(idx._id) });
+  }).catch(() => {}));
   res.status(201).json({ _id: submission._id, createdAt: submission.createdAt });
 });
 

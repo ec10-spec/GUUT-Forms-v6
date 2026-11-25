@@ -19,7 +19,7 @@ export default function PlatformAdmin({ currentUser }) {
       <span className="hero-eyebrow"><span className="dot" /> Platform team</span>
       <h1>Admin</h1>
       <div className="settings-tabs">
-        {[["companies", "Companies & databases"], ["users", "Users"], ["usage", "AI usage"], ["logs", "Logs"], ["overview", "Platform"]].map(([id, label]) => (
+        {[["companies", "Companies & databases"], ["users", "Users"], ["usage", "AI usage"], ["logs", "Logs"], ["funnel", "Funnel"], ["overview", "Platform"]].map(([id, label]) => (
           <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
@@ -27,6 +27,7 @@ export default function PlatformAdmin({ currentUser }) {
       {tab === "users" && <Users currentUser={currentUser} />}
       {tab === "usage" && <PlatformUsage />}
       {tab === "logs" && <Logs />}
+      {tab === "funnel" && <Funnel />}
       {tab === "overview" && <Overview />}
     </div>
   );
@@ -305,7 +306,34 @@ function Users({ currentUser }) {
 }
 
 // ---------------------------------------------------------------------- logs
-const CATEGORIES = ["auth", "form", "ai", "admin", "db", "http", "server_error", "client_error", "user_report", "system"];
+const CATEGORIES = ["auth", "form", "ai", "admin", "db", "http", "server_error", "client_error", "user_report", "funnel", "system"];
+
+const FUNNEL_LABELS = {
+  landing_view: "Landing page views", example_view: "Sample form views", made_with_click: "\"Made with\" clicks on forms",
+  signup_started: "Opened sign-up", signup_done: "Accounts created", first_form_created: "Created a first form",
+  first_publish: "Published a first form", first_response: "Forms that got a first response",
+};
+/** First-run funnel: where new people drop off. Steps about people count each account once. */
+function Funnel() {
+  const [d, setD] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => { api.funnelSummary().then(setD).catch((e) => setError(e.message)); }, []);
+  if (error) return <p className="error">{error}</p>;
+  if (!d) return <p className="empty-hint">Loading...</p>;
+  return (
+    <div className="admin-card">
+      <p className="settings-hint">From landing page to first response. Page views count visits; the other steps count accounts. Logs are kept for 30 days by default.</p>
+      <table className="resp-table funnel-table">
+        <thead><tr><th>Step</th><th>Last 7 days</th><th>Last 30 days</th></tr></thead>
+        <tbody>
+          {d.events.map((e) => (
+            <tr key={e.event}><td>{FUNNEL_LABELS[e.event] || e.event}</td><td>{e.days7.toLocaleString()}</td><td>{e.days30.toLocaleString()}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function Logs() {
   const [filters, setFilters] = useState({ level: "", category: "", q: "" });

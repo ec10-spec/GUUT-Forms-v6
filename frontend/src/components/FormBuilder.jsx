@@ -6,9 +6,24 @@ import SharePeopleModal from "./SharePeopleModal.jsx";
 import SubmissionsView from "./SubmissionsView.jsx";
 import ShareMenu from "./ShareMenu.jsx";
 import DesignPanel from "./DesignPanel.jsx";
-import ReviewBar from "./ReviewBar.jsx";
+import ReviewChip from "./ReviewBar.jsx";
+import ShareSheet from "./ShareSheet.jsx";
+import { askGuutAi } from "../lib/guutAi.js";
 import { api } from "../api.js";
 import { setLeaveGuard } from "../lib/navGuard.js";
+
+// One line under each question type in the "+ Add question" menu.
+const TYPE_HINTS = {
+  text: "A short answer, like a name",
+  textarea: "A longer answer, like feedback",
+  number: "A number, like an age or quantity",
+  email: "An email address, checked for you",
+  date: "A date from a calendar",
+  checkbox: "Pick any number of options",
+  select: "Pick exactly one option",
+  rating: "A score from 1 to 5 stars",
+  file: "An image, PDF or document",
+};
 
 const DEFAULT_THEME = { primaryColor: "#001549", backgroundColor: "#f6f7fb", headerImage: null };
 const AUTOSAVE_MS = 3000;
@@ -39,12 +54,18 @@ function AutoGrow(props) {
  * Single-page workspace for one form: Build / Design / Preview / Responses tabs
  * live here so nothing requires leaving the page. Handles create, edit, publish,
  * theming, the public-repository toggle, and the persistent Share menu.
- * Unsaved changes are tracked: leaving asks first, drafts autosave, and published forms keep a local backup
- * (published forms are never autosaved, so half-finished edits don't go live).
+ * Unsaved changes are tracked: leaving asks first, drafts autosave (a new form is created as soon as it has a
+ * question), and published forms keep a local backup: their edits only go live with "Publish changes".
+ * One primary action sits in the header: Publish, or Publish changes when a live form has edits.
  */
 export default function FormBuilder({ draft, formId, onSaved }) {
-  const [tab, setTab] = useState("build");
-  const [visited, setVisited] = useState({ build: true });
+  // Opened from a form card's response count: start on Responses.
+  const [tab, setTab] = useState(() => {
+    const t = formId ? ss.get(`guut_tab_${formId}`) : null;
+    if (t) ss.set(`guut_tab_${formId}`, null);
+    return t === "responses" ? "responses" : "build";
+  });
+  const [visited, setVisited] = useState(() => ({ build: true, [tab]: true }));
   const [title, setTitle] = useState(draft.title);
   const [description, setDescription] = useState(draft.description || "");
   const [fields, setFields] = useState(sortFields(draft.fields));
@@ -64,8 +85,12 @@ export default function FormBuilder({ draft, formId, onSaved }) {
   const [savedSnap, setSavedSnap] = useState(() => (formId ? snapshotOf({ ...draft, fields: sortFields(draft.fields), theme: { ...DEFAULT_THEME, ...(draft.theme || {}) } }) : null));
   const [savedAt, setSavedAt] = useState(null);
   const [status, setStatus] = useState(null);
-  const [notice, setNotice] = useState(() => (formId && ss.get(`guut_flash_${formId}`)) || null); // "published" | "saved"
-  const [copied, setCopied] = useState(false);
+  // After the first publish: the "your form is live" sheet with the link, embed code and download.
+  const [shareSheet, setShareSheet] = useState(() => !!formId && ss.get(`guut_flash_${formId}`) === "published");
+  const [addOpen, setAddOpen] = useState(false);
+  const [narrow, setNarrow] = useState(false); // builder too narrow for two columns: edit questions in place
+  const workspaceRef = useRef(null);
+  const creatingRef = useRef(false);
   const [backup, setBackup] = useState(null);
   const [shareOpen, setShareOpen] = useState(false);
   const fieldRefs = useRef({});
@@ -149,6 +174,29 @@ export default function FormBuilder({ draft, formId, onSaved }) {
     setAiUndo(null);
   }
 
+  useEffect(() => {
+    const el = workspaceRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setNarrow(e.contentRect.width < 860));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // "+ Add question" menu closes on outside click or Escape.
+  useEffect(() => {
+    if (!addOpen) return;
+    const onDown = (e) => { if (!e.target.closest?.(".add-question")) setAddOpen(false); };
+    const onKey = (e) => e.key === "Escape" && setAddOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [addOpen]);
+  const titleRef = useRef(null);
+  useEffect(() => {
+    // A brand-new blank form: put the cursor in the title so naming it is the obvious first step.
+    if (!formId && !draft.fields?.length) setTimeout(() => { titleRef.current?.focus(); titleRef.current?.select(); }, 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const selected = fields.find((f) => f.id === selectedId) || null;
 
   function reorder(newFields) {
@@ -156,6 +204,7 @@ export default function FormBuilder({ draft, formId, onSaved }) {
   }
 
   function addField(type) {
+    setAddOpen(false);
     const f = newField(type, fields.length);
     setFields([...fields, f]);
     setSelectedId(f.id);
@@ -225,22 +274,25 @@ export default function FormBuilder({ draft, formId, onSaved }) {
     setServerError(null);
     setSaving(true);
     const sentSnap = snap;
+    const creating = !id;
+    if (creating) creatingRef.current = true;
     try {
       // Save first, then publish, and update local state once with the final result.
       let result = id ? await api.updateForm(id, buildPayload()) : await api.createForm(buildPayload());
       if (publish) result = await api.publishForm(result._id);
+      const firstPublish = publish && !savedForm?.publishedAt;
       afterSave(result, sentSnap);
-      setStatus(publish ? "Form published" : "Draft saved");
-      if (publish) setNotice("published");
+      setStatus(publish ? (firstPublish ? "Published" : "Changes are live") : "Saved");
+      if (firstPublish) setShareSheet(true);
       if (!id) {
-        // A new form moves to its own address (and remounts): carry the selection and the notice across.
+        // A new form gets its own address; the builder stays as it is (see App.jsx).
         ss.set(`guut_sel_${result._id}`, selectedId);
-        if (publish) ss.set(`guut_flash_${result._id}`, "published");
         dirtyRef.current = false;
       }
       onSaved?.(result);
     } catch (err) {
       setServerError(err.message);
+      if (creating && !savedForm) creatingRef.current = false;
     } finally {
       setSaving(false);
     }
@@ -262,6 +314,37 @@ export default function FormBuilder({ draft, formId, onSaved }) {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap, id, savedForm?.publishedAt, readOnly, saving, clientErrors.length]);
+
+  // A new form is created on the server once it has a question, so nothing is lost if the tab closes.
+  useEffect(() => {
+    if (id || readOnly || !fields.length || saving || clientErrors.length || creatingRef.current) return;
+    const t = setTimeout(async () => {
+      if (creatingRef.current) return;
+      creatingRef.current = true;
+      const sentSnap = snap;
+      setAutoSaving(true);
+      try {
+        const result = await api.createForm(buildPayload());
+        afterSave(result, sentSnap);
+        ss.set(`guut_sel_${result._id}`, selectedId);
+        dirtyRef.current = false;
+        onSaved?.(result);
+      } catch (err) { setServerError(err.message); creatingRef.current = false; }
+      finally { setAutoSaving(false); }
+    }, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap, id, readOnly, saving, clientErrors.length]);
+
+  // Published forms: drop unpublished edits and go back to what is live.
+  function discardChanges() {
+    if (!savedSnap || !confirm("Discard your changes and go back to the live version?")) return;
+    try {
+      const b = JSON.parse(savedSnap);
+      setTitle(b.title); setDescription(b.description || ""); setFields(sortFields(b.fields)); setTheme({ ...DEFAULT_THEME, ...b.theme });
+    } catch { /* keep what is on screen */ }
+    if (backupKey) ls.set(backupKey, null);
+  }
 
   function restoreBackup() {
     try {
@@ -300,152 +383,183 @@ export default function FormBuilder({ draft, formId, onSaved }) {
 
   const shareUrl = api.shareUrl(savedForm?._id || "pending");
   const go = (t) => { setTab(t); setVisited((v) => ({ ...v, [t]: true })); };
-  const copyLink = () => { navigator.clipboard?.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); };
-  const saveState = readOnly ? null : saving || autoSaving ? "Saving..." : dirty ? (savedForm?.publishedAt ? "Unsaved changes" : id ? "Unsaved changes" : "Not saved yet") : savedAt ? "Saved" : id ? "All changes saved" : null;
+  const live = !!savedForm?.publishedAt;
+  const busyAny = saving || autoSaving;
+  const saveState = readOnly ? null : busyAny ? "Saving..." : live ? (dirty ? "Edits not live yet" : null) : dirty ? (id ? "Unsaved changes" : fields.length ? "Not saved yet" : null) : id ? "Saved" : null;
+  const errorsShown = (showErrors && clientErrors.length > 0) || serverError;
+
+  // One banner at most, the most important one.
+  const banner = readOnly
+    ? <div className="ro-banner">View only: you can look at this form, its responses and charts, but not change it. Ask the owner for edit access.</div>
+    : backup ? (
+      <div className="info-banner">
+        <span>You have unsaved changes to this form from {new Date(backup.at).toLocaleString()}.</span>
+        <span className="publish-notice-actions">
+          <button className="primary small" onClick={restoreBackup}>Restore them</button>
+          <button className="small" onClick={discardBackup}>Discard</button>
+        </span>
+      </div>
+    ) : aiUndo ? (
+      <div className="info-banner ai-applied" role="status">
+        <span><strong>GUUT AI updated this form.</strong> {live ? "Check the questions, then Publish changes to make them live." : "Check the questions. Changes save automatically."}</span>
+        <span className="publish-notice-actions">
+          <button className="small" onClick={undoAi}>Undo</button>
+          <button className="icon-btn" onClick={() => setAiUndo(null)} aria-label="Dismiss">✕</button>
+        </span>
+      </div>
+    ) : null;
+
+  const editorFor = (f) => (
+    <FieldEditor
+      field={f}
+      allFields={fields}
+      onChange={updateField}
+      onDelete={() => deleteField(f.id)}
+      onDuplicate={() => duplicateField(f.id)}
+    />
+  );
 
   return (
-    <div className="workspace">
+    <div className="workspace" ref={workspaceRef}>
       <nav className="crumbs" aria-label="Breadcrumb">
         <button onClick={() => { window.location.hash = "/"; }}>Forms</button>
         <span>/</span>
-        <strong>{title || "Untitled Form"}</strong>
+        <strong>{title || "Untitled form"}</strong>
       </nav>
       <div className="workspace-header">
-        <input className="form-title-input" value={title} onChange={(e) => setTitle(e.target.value)} disabled={readOnly} placeholder="Form title" aria-label="Form title" title={title} />
+        <input ref={titleRef} className="form-title-input" value={title} onChange={(e) => setTitle(e.target.value)} disabled={readOnly} placeholder="Name your form" aria-label="Form title" title={title} />
         <div className="workspace-tabs" role="tablist">
           {[["build", "Build"], ["design", "Design"], ["preview", "Preview"]].map(([k, l]) => (
             <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => go(k)}>{l}</button>
           ))}
-          <button role="tab" aria-selected={tab === "responses"} className={tab === "responses" ? "active" : ""} onClick={() => go("responses")} disabled={!savedForm} title={!savedForm ? "Save the form first" : ""}>
+          <button role="tab" aria-selected={tab === "responses"} className={tab === "responses" ? "active" : ""} onClick={() => go("responses")} disabled={!savedForm} title={!savedForm ? "Add a question first: the form saves itself" : ""}>
             Responses
           </button>
         </div>
         <div className="form-status">
-          <span className={`status-pill ${savedForm?.publishedAt ? "published" : "draft"}`}>{savedForm?.publishedAt ? "Published" : "Draft"}</span>
-          {savedForm?.publishedAt && isPublic && <span className="status-pill public">Public</span>}
+          <span className={`status-pill ${live ? "published" : "draft"}`}>{live ? "Live" : "Draft"}</span>
+          {live && isPublic && <span className="status-pill public">On Explore</span>}
+          {savedForm?._id && <ReviewChip key={`review-${shareOpen}`} formId={savedForm._id} dirty={dirty} updatedAt={savedForm.updatedAt} />}
           {status ? <span className="status-toast">{status}</span> : saveState && <span className={`save-state ${dirty ? "dirty" : ""}`} aria-live="polite">{saveState}</span>}
         </div>
-        <ShareMenu
-          shareUrl={shareUrl} published={!!savedForm?.publishedAt} isPublic={isPublic} listingStatus={listing}
-          onTogglePublic={togglePublic} form={savedForm} canManage={canManage} onSharePeople={() => setShareOpen(true)}
-        />
+        <div className="workspace-actions">
+          <ShareMenu
+            shareUrl={shareUrl} published={live} isPublic={isPublic} listingStatus={listing}
+            onTogglePublic={togglePublic} form={savedForm} canManage={canManage} onSharePeople={() => setShareOpen(true)}
+          />
+          {!readOnly && !live && (
+            <button className="primary publish-btn" disabled={saving || (autoSaving && !id)} onClick={() => handleSave({ publish: true })}>
+              {saving ? "Publishing..." : "Publish"}
+            </button>
+          )}
+          {!readOnly && live && dirty && (
+            <>
+              <button className="link-btn" disabled={saving} onClick={discardChanges}>Discard</button>
+              <button className="primary publish-btn" disabled={saving} onClick={() => handleSave({ publish: true })}>
+                {saving ? "Publishing..." : "Publish changes"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
-      {notice === "published" && savedForm?.publishedAt && (
-        <div className="publish-notice" role="status">
-          <span><strong>Published.</strong> Your form is live. Anyone with the link can respond.</span>
-          <span className="publish-notice-actions">
-            <button className="primary small" onClick={copyLink}>{copied ? "Copied" : "Copy link"}</button>
-            <a className="secondary small btn-link" href={shareUrl} target="_blank" rel="noreferrer">Open</a>
-            <button className="icon-btn" onClick={() => setNotice(null)} aria-label="Dismiss">✕</button>
-          </span>
+      {errorsShown && (
+        <div className="error-box" role="alert">
+          {showErrors && clientErrors.map((e, i) => <p key={i} className="error">{e}</p>)}
+          {serverError && <p className="error">{serverError}</p>}
         </div>
       )}
-      {backup && (
-        <div className="info-banner">
-          <span>You have unsaved changes to this form from {new Date(backup.at).toLocaleString()}.</span>
-          <span className="publish-notice-actions">
-            <button className="primary small" onClick={restoreBackup}>Restore them</button>
-            <button className="small" onClick={discardBackup}>Discard</button>
-          </span>
-        </div>
-      )}
-      {aiUndo && (
-        <div className="info-banner ai-applied" role="status">
-          <span><strong>GUUT AI updated this form.</strong> Check the questions, then save{savedForm?.publishedAt ? " to update the live form" : ""}.</span>
-          <span className="publish-notice-actions">
-            <button className="small" onClick={undoAi}>Undo</button>
-            <button className="icon-btn" onClick={() => setAiUndo(null)} aria-label="Dismiss">✕</button>
-          </span>
-        </div>
-      )}
-      {savedForm?._id && <ReviewBar key={`review-${shareOpen}`} formId={savedForm._id} dirty={dirty} updatedAt={savedForm.updatedAt} />}
-      {readOnly && (
-        <div className="ro-banner">View only: you can look at this form, its responses and charts, but not change it. Ask the owner for edit access.</div>
-      )}
+      {banner}
 
       {tab === "build" && (
         <fieldset disabled={readOnly} className="ro-fieldset">
-        <div className="builder">
+        <div className={`builder ${selected && !narrow ? "" : "single"}`}>
           <div className="builder-canvas">
-            <AutoGrow className="form-desc-input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Form description (optional)" rows={2} aria-label="Form description" />
+            <AutoGrow className="form-desc-input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description, shown under the title (optional)" rows={2} aria-label="Form description" />
 
-            <div className="field-list">
-              {fields.length === 0 && <p className="empty-hint">Add a field from the palette to get started.</p>}
-              {fields.map((f, i) => (
-                <div
-                  key={f.id}
-                  ref={(el) => (fieldRefs.current[f.id] = el)}
-                  draggable={!readOnly}
-                  onDragStart={() => setDragId(f.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => handleDropOn(f.id)}
-                  onClick={() => setSelectedId(f.id)}
-                  className={`field-card ${selectedId === f.id ? "selected" : ""}`}
-                >
-                  <span className="drag-handle" aria-hidden="true">⠿</span>
-                  <div className="field-preview">
-                    <label>
-                      {f.label}
-                      {f.required && <span className="required-mark">*</span>}
-                    </label>
-                    {f.type === "text" && <input disabled placeholder={f.placeholder} aria-label={f.label} />}
-                    {f.type === "textarea" && <textarea disabled placeholder={f.placeholder} rows={2} aria-label={f.label} />}
-                    {f.type === "number" && <input disabled type="number" placeholder={f.placeholder} aria-label={f.label} />}
-                    {f.type === "email" && <input disabled type="email" placeholder={f.placeholder} aria-label={f.label} />}
-                    {f.type === "date" && <input disabled type="date" aria-label={f.label} />}
-                    {f.type === "checkbox" && (
-                      <div className="checkbox-group">
-                        {f.options.map((o) => <label key={o} className="checkbox-option"><input type="checkbox" disabled aria-label={o} /><span>{o}</span></label>)}
-                      </div>
-                    )}
-                    {f.type === "select" && <select disabled aria-label={f.label}>{f.options.map((o) => <option key={o}>{o}</option>)}</select>}
-                    {f.type === "rating" && <div className="rating-group" aria-label="Rating from 1 to 5">{[1, 2, 3, 4, 5].map((n) => <span key={n} className="rating-star" aria-hidden="true">★</span>)}</div>}
-                    {f.type === "file" && <span className="file-button disabled">Choose a file</span>}
-                    {f.showIf?.fieldId && <span className="logic-badge">Shown only if a condition is met</span>}
-                  </div>
-                  {!readOnly && (
-                    <div className="move-btns">
-                      <button type="button" className="icon-btn" onClick={(e) => { e.stopPropagation(); move(f.id, -1); }} disabled={i === 0} aria-label={`Move "${f.label}" up`}>↑</button>
-                      <button type="button" className="icon-btn" onClick={(e) => { e.stopPropagation(); move(f.id, 1); }} disabled={i === fields.length - 1} aria-label={`Move "${f.label}" down`}>↓</button>
-                    </div>
-                  )}
+            {fields.length === 0 && !readOnly && (
+              <div className="empty-builder">
+                <h2>How do you want to start?</h2>
+                <div className="empty-builder-choices">
+                  <button type="button" className="empty-choice" onClick={() => askGuutAi(`Draft the questions for this form: ${title && title !== "Untitled Form" ? title : ""}`.trim())}>
+                    <strong>Describe it to GUUT AI</strong><span>Say what you need. GUUT AI suggests the questions and you apply them.</span>
+                  </button>
+                  <button type="button" className="empty-choice" onClick={() => { ss.set("guut_open_templates", "1"); window.location.hash = "/"; }}>
+                    <strong>Pick a template</strong><span>Start from a ready-made form and adjust it.</span>
+                  </button>
+                  <button type="button" className="empty-choice" onClick={() => setAddOpen(true)}>
+                    <strong>Add your first question</strong><span>Build it yourself, one question at a time.</span>
+                  </button>
                 </div>
-              ))}
-            </div>
-
-            <div className="palette">
-              {FIELD_TYPES.map((t) => (
-                <button key={t.type} onClick={() => addField(t.type)}>+ {t.label}</button>
-              ))}
-            </div>
-          </div>
-
-          <div className="builder-sidebar">
-            <FieldEditor
-              field={selected}
-              allFields={fields}
-              onChange={updateField}
-              onDelete={() => deleteField(selected.id)}
-              onDuplicate={() => duplicateField(selected.id)}
-            />
-            {((showErrors && clientErrors.length > 0) || serverError) && (
-              <div className="error-box" role="alert">
-                {showErrors && clientErrors.map((e, i) => <p key={i} className="error">{e}</p>)}
-                {serverError && <p className="error">{serverError}</p>}
               </div>
             )}
+
+            <div className="field-list">
+              {fields.map((f, i) => (
+                <React.Fragment key={f.id}>
+                  <div
+                    ref={(el) => (fieldRefs.current[f.id] = el)}
+                    draggable={!readOnly}
+                    onDragStart={() => setDragId(f.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handleDropOn(f.id)}
+                    onClick={() => setSelectedId(f.id)}
+                    className={`field-card ${selectedId === f.id ? "selected" : ""}`}
+                  >
+                    <span className="drag-handle" aria-hidden="true">⠿</span>
+                    <div className="field-preview">
+                      <label>
+                        {f.label}
+                        {f.required && <span className="required-mark">*</span>}
+                      </label>
+                      {f.type === "text" && <input disabled placeholder={f.placeholder} aria-label={f.label} />}
+                      {f.type === "textarea" && <textarea disabled placeholder={f.placeholder} rows={2} aria-label={f.label} />}
+                      {f.type === "number" && <input disabled type="number" placeholder={f.placeholder} aria-label={f.label} />}
+                      {f.type === "email" && <input disabled type="email" placeholder={f.placeholder} aria-label={f.label} />}
+                      {f.type === "date" && <input disabled type="date" aria-label={f.label} />}
+                      {f.type === "checkbox" && (
+                        <div className="checkbox-group">
+                          {f.options.map((o) => <label key={o} className="checkbox-option"><input type="checkbox" disabled aria-label={o} /><span>{o}</span></label>)}
+                        </div>
+                      )}
+                      {f.type === "select" && <select disabled aria-label={f.label}>{f.options.map((o) => <option key={o}>{o}</option>)}</select>}
+                      {f.type === "rating" && <div className="rating-group" aria-label="Rating from 1 to 5">{[1, 2, 3, 4, 5].map((n) => <span key={n} className="rating-star" aria-hidden="true">★</span>)}</div>}
+                      {f.type === "file" && <span className="file-button disabled">Choose a file</span>}
+                      {f.showIf?.fieldId && <span className="logic-badge">Shown only if a condition is met</span>}
+                    </div>
+                    {!readOnly && (
+                      <div className="move-btns">
+                        <button type="button" className="icon-btn" onClick={(e) => { e.stopPropagation(); move(f.id, -1); }} disabled={i === 0} aria-label={`Move "${f.label}" up`}>↑</button>
+                        <button type="button" className="icon-btn" onClick={(e) => { e.stopPropagation(); move(f.id, 1); }} disabled={i === fields.length - 1} aria-label={`Move "${f.label}" down`}>↓</button>
+                      </div>
+                    )}
+                  </div>
+                  {narrow && selectedId === f.id && !readOnly && <div className="inline-editor">{editorFor(f)}</div>}
+                </React.Fragment>
+              ))}
+            </div>
+
             {!readOnly && (
-              <>
-                <button className="secondary save-button" disabled={saving} onClick={() => handleSave({ publish: false })}>
-                  {saving ? "Saving..." : savedForm?.publishedAt ? "Save (updates the live form)" : "Save draft"}
-                </button>
-                <button className="primary save-button" disabled={saving} onClick={() => handleSave({ publish: true })}>
-                  {saving ? "Publishing..." : savedForm?.publishedAt ? "Republish (save changes live)" : "Publish form"}
-                </button>
-              </>
+              <div className="add-question">
+                <button type="button" className="secondary add-question-btn" onClick={() => setAddOpen((o) => !o)} aria-expanded={addOpen} aria-haspopup="menu">+ Add question</button>
+                {addOpen && (
+                  <div className="add-question-menu" role="menu">
+                    {FIELD_TYPES.map((t) => (
+                      <button key={t.type} type="button" role="menuitem" onClick={() => addField(t.type)}>
+                        <strong>{t.label}</strong><span>{TYPE_HINTS[t.type]}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
+
+          {selected && !narrow && (
+            <div className="builder-sidebar">
+              {editorFor(selected)}
+            </div>
+          )}
         </div>
         </fieldset>
       )}
@@ -469,6 +583,13 @@ export default function FormBuilder({ draft, formId, onSaved }) {
       )}
 
       {shareOpen && savedForm && <SharePeopleModal form={savedForm} onClose={() => setShareOpen(false)} />}
+      {shareSheet && live && (
+        <ShareSheet
+          form={savedForm} shareUrl={shareUrl} canManage={canManage}
+          onSharePeople={() => { setShareSheet(false); setShareOpen(true); }}
+          onClose={() => { setShareSheet(false); if (savedForm?._id) ss.set(`guut_flash_${savedForm._id}`, null); }}
+        />
+      )}
     </div>
   );
 }

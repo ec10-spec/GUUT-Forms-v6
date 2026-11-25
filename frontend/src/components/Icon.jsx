@@ -27,6 +27,7 @@ const P = {
   send: <path d="M5 12h12M12 6l6 6-6 6" />,
   trash: <><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></>,
   review: <><path d="M5 12.5 9.5 17 19 7.5" /></>,
+  clip: <path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" />,
 };
 
 export default function Icon({ name, size = 18, className = "" }) {

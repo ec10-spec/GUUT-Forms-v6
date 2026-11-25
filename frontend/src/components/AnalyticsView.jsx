@@ -127,7 +127,8 @@ export default function AnalyticsView({ form }) {
 
   if (error) return <p className="error">{error}</p>;
   if (!data) return <p className="empty-hint">Loading...</p>;
-  if (data.total === 0) return <p className="empty-hint">No responses yet. Charts appear as soon as people start answering.</p>;
+  if (!data || typeof data !== "object" || !Array.isArray(data.fields)) return <p className="empty-hint">No chart data yet.</p>;
+  if (!data.total) return <p className="empty-hint">No responses yet. Charts appear as soon as people start answering.</p>;
 
   const unit = data.timeline?.unit || "day";
   const points = data.timeline?.points || [];

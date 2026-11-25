@@ -13,6 +13,8 @@ const FormIndexSchema = new mongoose.Schema(
     title: { type: String, default: "" },
     description: { type: String, default: "" },
     fieldCount: { type: Number, default: 0 },
+    // Listed forms only: the first few question labels, so Explore can show what a form asks.
+    preview: { type: [String], default: undefined },
     isPublic: { type: Boolean, default: false },
     publishedAt: { type: Date, default: null },
     // Per-form sharing. Only people in the same company can ever appear here
@@ -103,6 +105,7 @@ export function syncIndex(form, companyId) {
       title: form.isPublic ? form.title : "",
       description: form.isPublic ? form.description || "" : "",
       fieldCount: form.isPublic ? form.fields?.length || 0 : 0,
+      preview: form.isPublic ? [...(form.fields || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).slice(0, 3).map((f) => String(f.label || "").slice(0, 120)) : [],
       isPublic: !!form.isPublic,
       publishedAt: form.publishedAt || null,
     },

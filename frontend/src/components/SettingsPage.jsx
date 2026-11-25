@@ -123,7 +123,6 @@ export default function SettingsPage({ user, onUserUpdated, initialTab }) {
 
   return (
     <div className="settings-page">
-      <span className="hero-eyebrow"><span className="dot" /> Account</span>
       <h1>Settings</h1>
 
       <div className="settings-tabs">
@@ -162,8 +161,8 @@ export default function SettingsPage({ user, onUserUpdated, initialTab }) {
         <div className="settings-panel">
           <h2>AI provider</h2>
           <p className="settings-hint">
-            AI form generation and the response analysis assistant use your own API key and your own provider billing. Pick Claude or ChatGPT,
-            paste a key, press Test connection to check it, then Save. You can save both and switch any time. Without a key, your free AI credit is used (when the platform offers it). Keys are personal: nobody else in your organisation uses yours.
+            GUUT AI and form drafting run on your own Claude or ChatGPT key, billed by your provider. Choose a provider, paste a key,
+            press Test connection, then Save. You can save both and switch any time. Keys are personal: nobody else uses yours.
           </p>
 
           <div className="theme-options provider-options">
@@ -189,14 +188,18 @@ export default function SettingsPage({ user, onUserUpdated, initialTab }) {
                 placeholder={ai[P.hasField] ? "•••••••• (saved, paste a new one to replace)" : P.placeholder} autoComplete="off"
               />
             </label>
-            <label>
-              Model (optional)
-              <input value={model} onChange={(e) => setModel(e.target.value)} placeholder={`Default: ${P.modelPlaceholder}`} autoComplete="off" />
-            </label>
             <p className="settings-hint small">
               Get a key at <strong>{P.where}</strong>. It's encrypted before it's stored and is never shown again.
-              Leave the model blank to use the default; type any model name your account can use to override it.
             </p>
+            <details className="advanced" open={!!model || undefined}>
+              <summary>Advanced</summary>
+              <label>
+                Model (optional)
+                <input value={model} onChange={(e) => setModel(e.target.value)} placeholder={`Default: ${P.modelPlaceholder}`} autoComplete="off" />
+                <span className="field-help">Leave blank for the default. Type any model name your account can use to override it.</span>
+              </label>
+              <GenerationLimit />
+            </details>
             {keyProblem && !msg && <p className="error">{keyProblem}</p>}
             {msgEl}
             <div className="api-key-actions">
@@ -218,7 +221,7 @@ export default function SettingsPage({ user, onUserUpdated, initialTab }) {
 
       {tab === "account" && (
         <div className="settings-panel">
-          <h2>Account</h2>
+          <h2>Your account</h2>
           <dl className="account-facts">
             <dt>Email</dt><dd>{user.email}</dd>
             <dt>Account type</dt><dd>{user.role === "superadmin" ? "Platform team" : user.company?.type === "individual" ? "Individual" : user.role === "admin" ? "Business admin" : "Business member"}</dd>
@@ -231,6 +234,7 @@ export default function SettingsPage({ user, onUserUpdated, initialTab }) {
             </dd>
           </dl>
 
+          <h2 className="settings-section-title">Sign-in and security</h2>
           <SignInMethods user={user} onUserUpdated={onUserUpdated} />
 
           <h2 className="settings-subhead">{noPassword ? "Set a password" : "Change password"}</h2>
@@ -282,8 +286,8 @@ function SignInMethods({ user, onUserUpdated }) {
   }
   return (
     <>
-      <h2 className="settings-subhead">Sign-in methods</h2>
-      <p className="settings-hint">Sign in with Google, Microsoft or Apple instead of typing a password.</p>
+      <h3 className="settings-minor">Google, Microsoft and Apple</h3>
+      <p className="settings-hint">Sign in with one of these instead of typing a password.</p>
       <div className="signin-methods">
         {shown.map((p) => (
           <div key={p.id} className="people-row">
@@ -296,5 +300,23 @@ function SignInMethods({ user, onUserUpdated }) {
       </div>
       {msg && <p className={msg.ok ? "key-saved-msg" : "error"}>{msg.text}</p>}
     </>
+  );
+}
+
+/** How long a drafted form may be: the most AI output one "Draft it" may use (stored in this browser). */
+function GenerationLimit() {
+  const KEY = "guut_gen_max_tokens";
+  const [v, setV] = useState(() => { try { return Number(localStorage.getItem(KEY)) || 1000; } catch { return 1000; } });
+  const save = (n) => { setV(n); try { localStorage.setItem(KEY, String(n)); } catch { /* ignore */ } };
+  return (
+    <label>
+      Longest form draft
+      <select value={v} onChange={(e) => save(Number(e.target.value))}>
+        <option value={600}>Short (fewer questions, cheapest)</option>
+        <option value={1000}>Standard</option>
+        <option value={1500}>Long (bigger forms)</option>
+      </select>
+      <span className="field-help">Limits how much the AI may write for one draft, which also limits cost.</span>
+    </label>
   );
 }

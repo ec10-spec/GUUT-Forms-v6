@@ -1,7 +1,7 @@
 import React from "react";
 import { FIELD_TYPES, needsOptions, LOGIC_OPS, FILE_KINDS, DEFAULT_FILE_KINDS, MAX_FILE_MB } from "./fields.js";
 
-/** "Show this field only if": the source question, an operator for its type, and the value(s). */
+/** "Show this question only if": the source question, an operator for its type, and the value(s). */
 function LogicEditor({ field, allFields, update }) {
   const order = allFields.findIndex((f) => f.id === field.id);
   // Only earlier questions can drive logic, so the form always reads top to bottom.
@@ -19,7 +19,7 @@ function LogicEditor({ field, allFields, update }) {
 
   return (
     <div className="logic-editor">
-      <span>Show this field only if</span>
+      <span>Show this question only if</span>
       <select value={c.fieldId || ""} aria-label="Question this depends on" onChange={(e) => {
         const s = allFields.find((f) => f.id === e.target.value);
         update({ showIf: { fieldId: e.target.value || null, op: s ? LOGIC_OPS[s.type][0][0] : "eq", values: [], equals: null } });
@@ -59,7 +59,7 @@ function LogicEditor({ field, allFields, update }) {
 
 /** Inline editor for whichever field is currently selected. */
 export default function FieldEditor({ field, allFields, onChange, onDelete, onDuplicate }) {
-  if (!field) return <div className="field-editor empty">Click a field to edit it.</div>;
+  if (!field) return <div className="field-editor empty">Click a question to edit it.</div>;
 
   function update(patch) {
     onChange({ ...field, ...patch });

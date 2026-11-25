@@ -110,7 +110,7 @@ export function cleanValue(field, raw) {
 export function cleanRows({ fields, headers, rows, mapping, timestampColumn }) {
   const col = (name) => (name ? headers.indexOf(name) : -1);
   const plan = fields.map((f) => ({ f, i: col(mapping?.[f.id]) })).filter((p) => p.i >= 0);
-  if (!plan.length) throw httpError(400, "Match at least one column to a field.");
+  if (!plan.length) throw httpError(400, "Match at least one column to a question.");
   const tsI = col(timestampColumn);
   const out = [];
   const issues = [];

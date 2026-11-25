@@ -1,23 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { api, saveSession, saveUser } from "../api.js";
 import Logo from "./Logo.jsx";
-import { LegalFooter } from "./PrivacyPage.jsx";
+import { track } from "../lib/funnel.js";
 
-const TYPES = [
-  ["individual", "Individual", "Free. For you, your friends or your class."],
-  ["business", "Business", "A shared workspace for your company."],
-  ["employee", "Join my company", "Use a company code. Your admin approves you."],
-];
-
-/**
- * Sign in or create an account. Opened from a company link (#/join/CODE) it shows the company's name
- * and, once the person is signed in, sends the join request for a company admin to approve.
- */
 /**
  * "Continue with Google / Microsoft / Apple". Only providers set up on the server are shown. For a new
  * account the chosen account type travels with the sign-in, so a business or a join request works the same
- * as with email. Brand marks are left out on purpose: add each provider's official button artwork from
- * their brand guidelines if you want it.
+ * as with email. Provider marks: drop each provider's official artwork (from their brand guidelines) into
+ * frontend/public/brand/google.svg, microsoft.svg and apple.svg and it shows on the button; missing files are skipped.
  */
 function OAuthButtons({ providers, creating, type, f, joinCode, onError }) {
   const enabled = (providers || []).filter((p) => p.enabled);
@@ -33,6 +23,7 @@ function OAuthButtons({ providers, creating, type, f, joinCode, onError }) {
     <div className="oauth-block">
       {enabled.map((p) => (
         <button key={p.id} type="button" className={`oauth-btn oauth-${p.id}`} onClick={() => go(p.id)}>
+          <img className="oauth-mark" src={`/brand/${p.id}.svg`} alt="" aria-hidden="true" onError={(e) => e.currentTarget.remove()} />
           Continue with {p.label}
         </button>
       ))}
@@ -41,9 +32,14 @@ function OAuthButtons({ providers, creating, type, f, joinCode, onError }) {
   );
 }
 
+/**
+ * Sign in or create an account. Opened from a company link (#/join/CODE) it shows the company's name
+ * and, once the person is signed in, sends the join request for a company admin to approve.
+ */
 export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
   const [mode, setMode] = useState(initial.mode || (joinCode ? "create" : "signin")); // "signin" | "create"
-  const [type, setType] = useState(joinCode ? "employee" : initial.type || null); // "individual" | "business" | "employee"
+  // Most people are signing up for themselves: start there. Business and "join my company" are one link away.
+  const [type, setType] = useState(joinCode ? "employee" : initial.type || "individual"); // "individual" | "business" | "employee"
   const [f, setF] = useState(() => {
     let email = "";
     try { email = sessionStorage.getItem("guut_auth_email") || ""; } catch { /* storage blocked */ }
@@ -74,7 +70,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
     api.joinInfo(joinCode).then((r) => setJoinName(r.companyName)).catch(() => setJoinBad(true));
   }, [joinCode]);
 
-  function go(nextMode, nextType = null, plan) {
+  function go(nextMode, nextType = "individual", plan) {
     setMode(nextMode); setType(nextType); setError(null);
     if (plan) set({ plan });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -108,7 +104,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
   }
 
   const creating = mode === "create";
-  const chooser = creating && !type;
+  useEffect(() => { if (creating) track("signup_started"); }, [creating]);
   const badJoin = joinCode && joinBad && !ignoreJoin;
 
   if (sentTo) {
@@ -167,37 +163,20 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
             </>
           )}
 
-          {chooser && (
-            <>
-              <h2 className="auth-title">Create your account</h2>
-              <p className="auth-sub">What are you signing up as?</p>
-              <div className="type-cards">
-                {TYPES.map(([id, title, desc]) => (
-                  <button key={id} type="button" className="type-card" onClick={() => go("create", id)}>
-                    <strong>{title}</strong><span>{desc}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
           {(!creating || type) && (
             <form onSubmit={submit} className="auth-form">
               {creating && (
                 <>
-                  <h2 className="auth-title">{type === "employee" ? (joinName ? `Join ${joinName}` : "Join your company") : `${TYPES.find((t) => t[0] === type)[1]} account`}</h2>
-                  {(!joinCode || ignoreJoin) && <button type="button" className="link-btn align-left" onClick={() => go("create")}>Change account type</button>}
-                  <label>Your name
-                    <input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder="Your name" autoComplete="name" />
-                  </label>
+                  <h2 className="auth-title">{type === "employee" ? (joinName ? `Join ${joinName}` : "Join your company") : type === "business" ? "Create a business account" : "Create your free account"}</h2>
+                  {type === "individual" && <p className="auth-sub">Free for individuals. No credit card.</p>}
                   {type === "business" && (
                     <>
                       <label>Company name
-                        <input value={f.companyName} onChange={(e) => set({ companyName: e.target.value })} placeholder="Acme Inc." required />
+                        <input value={f.companyName} onChange={(e) => set({ companyName: e.target.value })} placeholder="Acme Inc." required autoComplete="organization" />
                       </label>
                       <label>Plan
                         <select value={f.plan} onChange={(e) => set({ plan: e.target.value })}>
-                          {(plans?.business || [{ id: "starter", name: "Starter", priceLabel: "" }]).map((p) => (
+                          {(plans?.business || [{ id: "starter", name: "Teams", priceLabel: "" }]).map((p) => (
                             <option key={p.id} value={p.id}>{p.name}{p.priceLabel ? `: ${p.priceLabel}` : ""}</option>
                           ))}
                         </select>
@@ -210,9 +189,9 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
                       <span className="field-help">Ask your company admin. They approve your account before you can use the company's forms.</span>
                     </label>
                   )}
+                  <OAuthButtons providers={providers} creating type={type} f={f} joinCode={joinCode} onError={setError} />
                 </>
               )}
-              {creating && <OAuthButtons providers={providers} creating type={type} f={f} joinCode={joinCode} onError={setError} />}
               <label>Email
                 <input type="email" value={f.email} onChange={(e) => set({ email: e.target.value })} placeholder="you@company.com" autoComplete="email" required />
               </label>
@@ -225,6 +204,11 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
                   <button type="button" className="link-btn show-pw" onClick={() => setShowPw((v) => !v)} aria-pressed={showPw} aria-label={showPw ? "Hide password" : "Show password"}>{showPw ? "Hide" : "Show"}</button>
                 </span>
               </label>
+              {creating && (
+                <label><span>Your name <span className="optional">(optional)</span></span>
+                  <input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder="How you appear to teammates" autoComplete="name" />
+                </label>
+              )}
               {!creating && <a className="link-btn align-left forgot-link" href="#/forgot">Forgot password?</a>}
 
               {error && <p className="error">{error}</p>}
@@ -236,6 +220,13 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
                 {busy ? "Please wait..." : !creating ? "Sign in" : type === "employee" ? "Request to join" : "Create account"}
               </button>
               {creating && <p className="legal-note">By creating an account you agree to how we handle data in our <a href="#/privacy">Privacy policy</a>.</p>}
+              {creating && (!joinCode || ignoreJoin) && (
+                <div className="auth-alt">
+                  {type !== "individual" && <button type="button" className="link-btn" onClick={() => go("create", "individual")}>Back to a free personal account</button>}
+                  {type !== "business" && <span>Setting up for a company? <button type="button" className="link-btn" onClick={() => go("create", "business")}>Create a business account</button></span>}
+                  {type !== "employee" && <span>Have a company code? <button type="button" className="link-btn" onClick={() => go("create", "employee")}>Join your company</button></span>}
+                </div>
+              )}
             </form>
           )}
           </>}
@@ -243,7 +234,6 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
 
       </div>
       </div>
-      <LegalFooter />
     </div>
   );
 }

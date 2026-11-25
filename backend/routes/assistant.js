@@ -41,7 +41,7 @@ const GUIDE = `How GUUT Forms works (use this to answer "how do I" questions; do
 - Notifications (Settings): emails when a form is created (admins), when responses arrive (every response, every N hours or every N responses), and for access requests.
 - AI: everyone uses their own Claude or ChatGPT key, saved in Settings, AI. Usage and token counts are under Settings, Usage.
 - Plans: Freemium ($0, individuals, up to 10 forms), Teams ($29 a month, up to 10 people, team admin and invites, activity logs; upgrade from Pricing without a new account), Servers (contact us; your own install and database). Prices are placeholders.
-- Sign in with email and password, or with Google, Microsoft or Apple when they are set up.`;
+- Sign in with email and password, or with Google, Microsoft or Apple when they are set up. Connect or disconnect them in Settings, Account, Sign-in methods; accounts made with them can set a password there too.`;
 
 const SYSTEM = `You are GUUT AI, the assistant built into GUUT Forms, a form builder. You help the person get things done in the app.
 

@@ -55,6 +55,51 @@ Vercel expects the Pro plan ($20 per user per month). Check Vercel's fair use te
 
 ---
 
+## v13 changes: GUUT AI, Google / Microsoft / Apple sign-in, team reviewers, privacy policy, new pricing
+
+### GUUT AI (the assistant beside every page)
+- Docked on the right and open by default on wide screens once the person has an AI key; the X closes it and the
+  GUUT AI button brings it back. Without a key it shows "Add your AI key to activate GUUT AI".
+- It knows the page and the open form: finds forms, drafts new ones (opens them in the builder), proposes edits to
+  the open form (the person clicks Apply, then saves; Undo is offered), explains responses (aggregates only) and
+  answers how-to questions. Question ids are kept on edits, so existing responses stay linked.
+- Chat history: on by default, saved per person in their workspace database (`AssistantChat`). The assistant's
+  options menu turns "Save chat history" off (nothing is stored), deletes single chats or all of them.
+- Uses the same per-person key, daily token limit and usage tracking as the other AI features (`ai_assistant`).
+
+### Sign in with Google, Microsoft and Apple
+Each button appears only when its variables are set. Register this redirect URI with each provider:
+`<APP_URL>/api/auth/oauth/<google|microsoft|apple>/callback` (set `OAUTH_REDIRECT_BASE` if the API is on a different address than `APP_URL`).
+
+| Provider | Variables | Where to get them |
+| --- | --- | --- |
+| Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console, APIs and Services, Credentials, OAuth client ID (Web application) |
+| Microsoft | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, optional `MICROSOFT_TENANT` (default `common`) | Microsoft Entra admin center, App registrations; add the redirect URI under Web; create a client secret |
+| Apple | `APPLE_CLIENT_ID` (Services ID), `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (contents of the .p8 key; `\n` for line breaks is fine) | Apple Developer, Certificates, Identifiers and Profiles: a Services ID with Sign in with Apple, and a key with Sign in with Apple. Needs a paid Apple Developer account and an HTTPS domain |
+
+- New people get an account of the type they picked (individual by default; business and "join my company" work too).
+- An existing account is linked automatically when the provider has verified the same email. Otherwise the person
+  signs in with their password once and uses Settings, Account, Sign-in methods, Connect.
+- Accounts made this way have no password; they can set one in Settings, Account, or with Forgot password.
+- The buttons are text only. Add each provider's official button artwork if you want it (their brand guidelines apply).
+
+### Team reviewers
+- On the Teams page a team manager sets each member to Member or Reviewer.
+- In the builder an editor chooses Request review and picks a team the form is shared with that has reviewers.
+  Reviewers get an email (title and link only), see the form under Teams, Waiting for your review, and approve or
+  request changes with a note. Review never blocks publishing.
+
+### Privacy policy and pricing
+- `#/privacy` page, linked from the sign-up form, the sidebar and the footer of signed-out pages. It is a draft
+  written to match what the app does; have it reviewed before launch, and update it when a new service handles data.
+- Pricing follows the agreed format: Freemium ($0, up to 10 forms), Teams ($29 a month, up to 10 people), Servers
+  (contact us). Plan ids are unchanged (`starter` = Teams, `scale` = Servers); the old $59 tier (`growth`) is
+  hidden but still valid for anyone on it. "Up to 10 forms" is shown; set `INDIVIDUAL_MAX_FORMS=10` to enforce it.
+- Individuals upgrade to Teams from the Pricing page without a new account: their workspace becomes a company,
+  they become its admin, and forms, responses and shares stay where they are.
+
+---
+
 ## v12 changes: QA round fixes
 
 The full list, item by item, is in `CHANGES-QA-ROUND.md`. What changes for whoever runs the app:

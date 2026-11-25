@@ -13,7 +13,9 @@ const TeamSchema = new mongoose.Schema(
     // a club). false = a business team, limited to that company's own people.
     open: { type: Boolean, default: false },
     members: {
-      type: [new mongoose.Schema({ userId: { type: String, required: true }, addedBy: { type: String, default: null }, addedAt: { type: Date, default: Date.now } }, { _id: false })],
+      // role: "member" or "reviewer". Reviewers are asked to review the team's forms before they go out
+      // (see routes/sharing.js, review). Their access to a form still comes from the form's team share.
+      type: [new mongoose.Schema({ userId: { type: String, required: true }, role: { type: String, enum: ["member", "reviewer"], default: "member" }, addedBy: { type: String, default: null }, addedAt: { type: Date, default: Date.now } }, { _id: false })],
       default: [],
     },
   },

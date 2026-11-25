@@ -252,3 +252,36 @@ export const notifyListingDecision = safe(async ({ user, title, approved }) => {
   });
   await sendMail({ to: user.email, subject: approved ? `"${title}" is now public` : `Public listing declined: "${title}"`, text, html });
 });
+
+/** An editor asked a team's reviewers to review a form: tell each reviewer (not the requester). */
+export const notifyReviewRequest = safe(async ({ idx, team, requester }) => {
+  if (!mailEnabled()) return;
+  const ids = team.members.filter((m) => m.role === "reviewer" && m.userId !== String(requester._id)).map((m) => m.userId).filter((x) => mongoose.isValidObjectId(x));
+  const people = await User.find({ _id: { $in: ids }, active: true }).select("email");
+  if (!people.length) return;
+  const title = (await titleOf(idx)) || "a form";
+  const who = requester.name || requester.email;
+  for (const p of people) {
+    const { text, html } = renderEmail({
+      heading: "A form is waiting for your review",
+      lines: [`${who} asked the ${team.name} reviewers to review "${title}".`, "Open the form to approve it or ask for changes."],
+      cta: "Review the form", url: link(idx._id),
+    });
+    await sendMail({ to: p.email, subject: `Review requested: "${title}"`, text, html });
+  }
+});
+
+/** The person who asked for the review hears the outcome (the reviewer's note stays in the app). */
+export const notifyReviewDecision = safe(async ({ idx, requesterId, reviewer, approved }) => {
+  if (!mailEnabled() || !mongoose.isValidObjectId(requesterId) || String(requesterId) === String(reviewer._id)) return;
+  const person = await User.findById(requesterId).select("email active");
+  if (!person?.active) return;
+  const title = (await titleOf(idx)) || "a form";
+  const who = reviewer.name || reviewer.email;
+  const { text, html } = renderEmail({
+    heading: approved ? "Your form was approved" : "Changes were requested on your form",
+    lines: [approved ? `${who} approved "${title}".` : `${who} asked for changes to "${title}". Open the form to see what to change.`],
+    cta: "Open form", url: link(idx._id),
+  });
+  await sendMail({ to: person.email, subject: approved ? `Approved: "${title}"` : `Changes requested: "${title}"`, text, html });
+});

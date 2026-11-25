@@ -20,6 +20,10 @@ MERN app: `backend/` (Express, Mongoose, ES modules) and `frontend/` (React, Vit
 - Files: respondents' uploads and header images are GridFS files in the tenant DB (`utils/uploads.js`, buckets `uploads` and `assets`), never inside documents. Saved AI chats: `AnalysisChat` in the tenant DB.
 - Dates: group by the viewer's IANA zone (`utils/time.js`); the client sends `tz`.
 - Sessions: JWTs carry `tokenVersion`; `User.setPasswordHash()` bumps it. Platform DB name: `PLATFORM_DB_NAME` (see `choosePlatformDbName`). AI cost: `utils/pricing.js`.
+- GUUT AI: `routes/assistant.js` + `components/GuutAssistant.jsx`. Replies are JSON `{ reply, actions }`; actions are re-checked on the server (`cleanActions`, `cleanEditFields` keeps question ids). The builder reports its state with the `guut:builder-state` event and applies edits on `guut:assistant-apply`. History: `AssistantChat` (tenant DB), off when `settings.assistantSaveHistory` is false.
+- Sign-in providers: `routes/oauth.js` (Google, Microsoft, Apple; OIDC code flow, state + cookie nonce, 2-minute ticket swapped at `/exchange`). `User.oauth.<provider>` holds the provider's id; `User.passwordSet` false = no password yet.
+- Team reviewers: `Team.members[].role` (member, reviewer); `FormIndex.review` (status none, requested, approved, changes_requested); routes in `routes/sharing.js`.
+- Pricing: Freemium, Teams (`starter`), Servers (`scale`); `growth` retired. `POST /api/auth/upgrade` turns an individual workspace into a business.
 - Frontend: hash routing in `App.jsx`, sidebar in `components/Sidebar.jsx`, logo in `components/Logo.jsx` (CSS variables `--logo-ink`, `--logo-sub`, `--logo-dot`).
 
 ## Rules

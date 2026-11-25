@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api, saveSession, saveUser } from "../api.js";
 import Logo from "./Logo.jsx";
+import { LegalFooter } from "./PrivacyPage.jsx";
 
 const TYPES = [
   ["individual", "Individual", "Free. For you, your friends or your class."],
@@ -12,6 +13,34 @@ const TYPES = [
  * Sign in or create an account. Opened from a company link (#/join/CODE) it shows the company's name
  * and, once the person is signed in, sends the join request for a company admin to approve.
  */
+/**
+ * "Continue with Google / Microsoft / Apple". Only providers set up on the server are shown. For a new
+ * account the chosen account type travels with the sign-in, so a business or a join request works the same
+ * as with email. Brand marks are left out on purpose: add each provider's official button artwork from
+ * their brand guidelines if you want it.
+ */
+function OAuthButtons({ providers, creating, type, f, joinCode, onError }) {
+  const enabled = (providers || []).filter((p) => p.enabled);
+  if (!enabled.length) return null;
+  function go(id) {
+    if (creating && type === "business" && String(f.companyName || "").trim().length < 2) { onError("Enter your company name first."); return; }
+    if (creating && type === "employee" && !String(f.joinCode || joinCode || "").trim()) { onError("Enter your company code first."); return; }
+    const extra = creating ? { type, companyName: type === "business" ? f.companyName : "", plan: type === "business" ? f.plan : "", joinCode: type === "employee" ? f.joinCode || joinCode : "" } : (joinCode ? { joinCode } : {});
+    try { if (joinCode) sessionStorage.setItem("guut_oauth_join", joinCode); else sessionStorage.removeItem("guut_oauth_join"); } catch { /* ignore */ }
+    window.location.href = api.oauthStartUrl(id, extra);
+  }
+  return (
+    <div className="oauth-block">
+      {enabled.map((p) => (
+        <button key={p.id} type="button" className={`oauth-btn oauth-${p.id}`} onClick={() => go(p.id)}>
+          Continue with {p.label}
+        </button>
+      ))}
+      <div className="oauth-or"><span>or use your email</span></div>
+    </div>
+  );
+}
+
 export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
   const [mode, setMode] = useState(initial.mode || (joinCode ? "create" : "signin")); // "signin" | "create"
   const [type, setType] = useState(joinCode ? "employee" : initial.type || null); // "individual" | "business" | "employee"
@@ -23,6 +52,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
   const [showPw, setShowPw] = useState(false);
   const [ignoreJoin, setIgnoreJoin] = useState(false); // an invalid company link: continue as a normal sign-in
   const [plans, setPlans] = useState(null);
+  const [providers, setProviders] = useState(null);
   const [joinName, setJoinName] = useState(null);
   const [joinBad, setJoinBad] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -36,7 +66,9 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
     if (patch.email !== undefined) { try { sessionStorage.setItem("guut_auth_email", patch.email); } catch { /* ignore */ } }
   };
 
-  useEffect(() => { api.plans().then(setPlans).catch(() => {}); }, []);
+  useEffect(() => { api.plans().then(setPlans).catch(() => {}); api.oauthProviders().then(setProviders).catch(() => setProviders([])); }, []);
+  // A failed Google / Microsoft / Apple sign-in comes back here with a message.
+  useEffect(() => { if (initial.error) setError(initial.error); }, [initial.error]);
   useEffect(() => {
     if (!joinCode) return;
     api.joinInfo(joinCode).then((r) => setJoinName(r.companyName)).catch(() => setJoinBad(true));
@@ -130,7 +162,8 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
           {!creating && (
             <>
               <h2 className="auth-title spaced">Welcome back</h2>
-              <p className="auth-sub">Sign in with your email and password.</p>
+              <p className="auth-sub">Sign in to continue.</p>
+              <OAuthButtons providers={providers} creating={false} f={f} joinCode={joinName ? joinCode : ""} onError={setError} />
             </>
           )}
 
@@ -179,6 +212,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
                   )}
                 </>
               )}
+              {creating && <OAuthButtons providers={providers} creating type={type} f={f} joinCode={joinCode} onError={setError} />}
               <label>Email
                 <input type="email" value={f.email} onChange={(e) => set({ email: e.target.value })} placeholder="you@company.com" autoComplete="email" required />
               </label>
@@ -201,6 +235,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
               <button className="primary" type="submit" disabled={busy}>
                 {busy ? "Please wait..." : !creating ? "Sign in" : type === "employee" ? "Request to join" : "Create account"}
               </button>
+              {creating && <p className="legal-note">By creating an account you agree to how we handle data in our <a href="#/privacy">Privacy policy</a>.</p>}
             </form>
           )}
           </>}
@@ -208,6 +243,7 @@ export default function AuthPage({ onAuth, joinCode = "", initial = {} }) {
 
       </div>
       </div>
+      <LegalFooter />
     </div>
   );
 }

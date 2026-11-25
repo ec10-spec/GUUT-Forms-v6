@@ -45,6 +45,7 @@ export default function SettingsPage({ user, onUserUpdated, initialTab }) {
   const [msg, setMsg] = useState(null); // { ok, text }
   const [pw, setPw] = useState({ current: "", next: "" });
 
+  const noPassword = user.passwordSet === false; // created with Google, Microsoft or Apple
   const provider = PROVIDERS[ai.provider] ? ai.provider : "anthropic";
   const P = PROVIDERS[provider];
 
@@ -108,7 +109,8 @@ export default function SettingsPage({ user, onUserUpdated, initialTab }) {
     try {
       await api.changePassword(pw.current, pw.next);
       setPw({ current: "", next: "" });
-      setMsg({ ok: true, text: "Password changed. You were signed out on your other devices." });
+      setMsg({ ok: true, text: noPassword ? "Password set. You can now also sign in with your email and password." : "Password changed. You were signed out on your other devices." });
+      if (noPassword) { const { user: u } = await api.me(); saveUser(u); onUserUpdated(u); }
     } catch (err) {
       setMsg({ ok: false, text: err.message });
     } finally {
@@ -229,22 +231,70 @@ export default function SettingsPage({ user, onUserUpdated, initialTab }) {
             </dd>
           </dl>
 
-          <h2 className="settings-subhead">Change password</h2>
-          <p className="settings-hint">Changing your password signs you out on every other device.</p>
+          <SignInMethods user={user} onUserUpdated={onUserUpdated} />
+
+          <h2 className="settings-subhead">{noPassword ? "Set a password" : "Change password"}</h2>
+          <p className="settings-hint">{noPassword ? "Your account signs in with Google, Microsoft or Apple. Add a password to also sign in with your email." : "Changing your password signs you out on every other device."}</p>
           <form onSubmit={changePassword} className="api-key-form">
-            <label>Current password
-              <input type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" required />
-            </label>
+            {!noPassword && (
+              <label>Current password
+                <input type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" required />
+              </label>
+            )}
             <label>New password (8+ characters)
               <input type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" minLength={8} required />
             </label>
             {msgEl}
             <div className="api-key-actions">
-              <button className="primary" type="submit" disabled={busy}>Update password</button>
+              <button className="primary" type="submit" disabled={busy}>{noPassword ? "Set password" : "Update password"}</button>
             </div>
           </form>
         </div>
       )}
     </div>
+  );
+}
+
+const PROVIDER_LABEL = { google: "Google", microsoft: "Microsoft", apple: "Apple" };
+
+/** Connected Google / Microsoft / Apple sign-ins: connect another one, or disconnect. */
+function SignInMethods({ user, onUserUpdated }) {
+  const [providers, setProviders] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [msg, setMsg] = useState(() => {
+    try { const m = sessionStorage.getItem("guut_oauth_msg"); sessionStorage.removeItem("guut_oauth_msg"); return m ? JSON.parse(m) : null; } catch { return null; }
+  });
+  React.useEffect(() => { api.oauthProviders().then(setProviders).catch(() => setProviders([])); }, []);
+  const linked = new Set(user.signInMethods || []);
+  const shown = (providers || []).filter((p) => p.enabled || linked.has(p.id));
+  if (!shown.length) return null;
+
+  async function connect(id) {
+    setBusy(id); setMsg(null);
+    try { const { ticket } = await api.oauthLinkTicket(); window.location.href = api.oauthStartUrl(id, { link: ticket }); }
+    catch (err) { setMsg({ ok: false, text: err.message }); setBusy(null); }
+  }
+  async function disconnect(id) {
+    setBusy(id); setMsg(null);
+    try { const { user: u } = await api.oauthUnlink(id); saveUser(u); onUserUpdated(u); setMsg({ ok: true, text: `${PROVIDER_LABEL[id]} sign-in disconnected.` }); }
+    catch (err) { setMsg({ ok: false, text: err.message }); }
+    finally { setBusy(null); }
+  }
+  return (
+    <>
+      <h2 className="settings-subhead">Sign-in methods</h2>
+      <p className="settings-hint">Sign in with Google, Microsoft or Apple instead of typing a password.</p>
+      <div className="signin-methods">
+        {shown.map((p) => (
+          <div key={p.id} className="people-row">
+            <div><strong>{p.label}</strong><span>{linked.has(p.id) ? "Connected" : "Not connected"}</span></div>
+            {linked.has(p.id)
+              ? <button className="small" disabled={!!busy} onClick={() => disconnect(p.id)}>Disconnect</button>
+              : p.enabled && <button className="small secondary" disabled={!!busy} onClick={() => connect(p.id)}>{busy === p.id ? "Opening..." : "Connect"}</button>}
+          </div>
+        ))}
+      </div>
+      {msg && <p className={msg.ok ? "key-saved-msg" : "error"}>{msg.text}</p>}
+    </>
   );
 }

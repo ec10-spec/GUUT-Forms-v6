@@ -8,33 +8,43 @@ import { httpError } from "./http.js";
 
 const num = (v) => (v === undefined || v === "" || v === null ? null : Number(v));
 
+// Pricing format agreed with the team (Nov 2026): Freemium, Teams, Servers. Prices are placeholders.
+// The free plan advertises FREEMIUM_FORMS forms; the limit is only ENFORCED when INDIVIDUAL_MAX_FORMS is set.
+export const FREEMIUM_FORMS = 10;
+
 export const INDIVIDUAL = {
   id: "individual",
-  name: "Free",
-  tagline: "For students, creators and small groups",
+  name: "Freemium",
+  tagline: "For individuals",
   priceLabel: "$0",
-  note: "Usage-based pricing will be added later. There is no limit today.",
-  features: ["Unlimited forms and responses (for now)", "Charts, PDF export and response import", "Share forms and create team spaces with anyone", "Download any form as a shareable HTML file", "AI assistant with your own key. $5 free AI credit coming soon", "Hosted by us, nothing to set up"],
+  note: "Prices are placeholders while pricing is reviewed.",
+  features: ["All form building and sharing", "Bring your own AI key (Claude or ChatGPT)", `Up to ${FREEMIUM_FORMS} forms`],
   // null = unlimited. Set INDIVIDUAL_MAX_FORMS / INDIVIDUAL_MAX_RESPONSES_PER_MONTH to start enforcing.
   limits: () => ({ maxForms: num(process.env.INDIVIDUAL_MAX_FORMS), maxResponsesPerMonth: num(process.env.INDIVIDUAL_MAX_RESPONSES_PER_MONTH), maxStorageMb: num(process.env.INDIVIDUAL_MAX_STORAGE_MB) }),
 };
 
+// Plan ids stay stable because companies store them: "starter" is now Teams, "scale" is now Servers.
+// "growth" (the old $59 / 25 people tier) is retired: hidden from every price list, still valid for
+// companies already on it.
 export const BUSINESS_PLANS = [
- { id: "starter", name: "Starter", priceLabel: "$29 / month", placeholder: true, maxSeats: 5, maxStorageMb: 500, features: ["Everything in Free", "Up to 5 team members", "500 MB hosted storage", "Company join link and approvals", "Connect your own database", "Send HTML form responses to your own server", "Remove GUUT branding from public forms"] },
- { id: "growth", name: "Growth", priceLabel: "$99 / month", placeholder: true, maxSeats: 25, maxStorageMb: 5120, features: ["Up to 25 team members", "5 GB hosted storage", "Everything in Starter", "Team usage tracking for admins"] },
- { id: "scale", name: "Scale", priceLabel: "Custom", placeholder: true, maxSeats: null, maxStorageMb: null, features: ["Unlimited team members", "Custom storage", "Everything in Growth", "Help with onboarding and a dedicated database"] },
+  { id: "starter", name: "Teams", priceLabel: "$29 / month", seatsLabel: "up to 10 people", placeholder: true, maxSeats: 10, maxStorageMb: 1024, features: ["Everything in Freemium", "Team admin and invites", "Company activity logs", "More forms, shared by the team"], upgradeNote: "Upgrade from inside the app. No new sign-up." },
+  { id: "scale", name: "Servers", priceLabel: "Contact us", tagline: "For companies that run it on their own servers", placeholder: true, contact: true, maxSeats: null, maxStorageMb: null, features: ["Your own install and your own database", "GUUT has no access to your data", "Price set for your team"] },
+  { id: "growth", name: "Growth (retired)", priceLabel: "$59 / month", retired: true, placeholder: true, maxSeats: 25, maxStorageMb: 5120, features: ["Up to 25 team members", "Everything in Teams"] },
 ];
+export const ACTIVE_PLANS = BUSINESS_PLANS.filter((p) => !p.retired);
 
 export const planById = (id) => BUSINESS_PLANS.find((p) => p.id === id) || null;
+/** Plans a company may choose now (retired plans only for the company already on one). */
+export const choosablePlan = (id, currentId = null) => { const p = planById(id); return p && (!p.retired || p.id === currentId) ? p : null; };
 
 /** Public pricing shown on the login page. */
 export const publicPlans = () => {
   const mb = INDIVIDUAL.limits().maxStorageMb;
-  const storage = mb == null ? "Unlimited storage (for now)" : `${mb} MB of storage`;
   return {
-    individual: { ...INDIVIDUAL, features: [storage, ...INDIVIDUAL.features], limits: undefined },
-    business: BUSINESS_PLANS,
-    pricingIsPlaceholder: BUSINESS_PLANS.some((p) => p.placeholder),
+    individual: { ...INDIVIDUAL, features: mb == null ? INDIVIDUAL.features : [...INDIVIDUAL.features, `${mb} MB of storage`], limits: undefined },
+    business: ACTIVE_PLANS,
+    aiNote: "AI runs on your own key, so you only pay your AI provider for what you use. A typical form costs about 1 to 2 cents.",
+    pricingIsPlaceholder: ACTIVE_PLANS.some((p) => p.placeholder),
   };
 };
 // Billing is recorded now but only ENFORCED when ENFORCE_BILLING=true, because there is no

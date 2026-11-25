@@ -26,6 +26,12 @@ export default function ReportWidget() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
+  // GUUT AI's menu opens this panel too (its floating button is hidden while the assistant is docked).
+  React.useEffect(() => {
+    const on = () => setOpen(true);
+    window.addEventListener("guut:report-open", on);
+    return () => window.removeEventListener("guut:report-open", on);
+  }, []);
 
   function reset() {
     setName(""); setEmail(""); setMessage(""); setFile(null); setError(null); setDone(false);

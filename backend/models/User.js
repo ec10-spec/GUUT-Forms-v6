@@ -17,8 +17,19 @@ const UserSchema = new mongoose.Schema(
     lastLoginAt: { type: Date, default: null },
     settings: {
       theme: { type: String, enum: ["light", "dark", "system"], default: "system" },
+      // GUUT AI assistant: keep conversations so they can be reopened later (per person, off = nothing stored).
+      assistantSaveHistory: { type: Boolean, default: true },
       // Legacy single Anthropic key from v0.1; still read as a fallback.
       aiApiKeyEncrypted: { type: String, default: null },
+    },
+    // false = created with Google, Microsoft or Apple and no password chosen yet (the stored hash is random).
+    passwordSet: { type: Boolean, default: true },
+    // Linked sign-in providers: the provider's stable account id ("sub"). Apple only sends the email once,
+    // so later Apple sign-ins are matched by this id.
+    oauth: {
+      google: { type: String, default: null },
+      microsoft: { type: String, default: null },
+      apple: { type: String, default: null },
     },
     // Self-service sign-ups must confirm their email before they can sign in. Accounts created by
     // an admin, and accounts that existed before this was added, count as confirmed.
@@ -67,8 +78,14 @@ const UserSchema = new mongoose.Schema(
 
 const hintOf = (enc) => { try { return enc ? decrypt(enc).slice(-4) : ""; } catch { return ""; } };
 
+UserSchema.index({ "oauth.google": 1 }, { sparse: true });
+UserSchema.index({ "oauth.microsoft": 1 }, { sparse: true });
+UserSchema.index({ "oauth.apple": 1 }, { sparse: true });
+
 UserSchema.set("toJSON", {
   transform: (_doc, ret) => {
+    ret.signInMethods = ["google", "microsoft", "apple"].filter((p) => ret.oauth?.[p]);
+    delete ret.oauth;
     delete ret.emailVerification;
     delete ret.passwordReset;
     delete ret.tokenVersion;

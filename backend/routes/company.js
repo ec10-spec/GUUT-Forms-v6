@@ -10,7 +10,7 @@ import { openVerifiedConnection, getTenant } from "../config/db.js";
 import { linkDatabase, checkDatabase, normalizeUri } from "../utils/companyDb.js";
 import { httpError } from "../utils/http.js";
 import { uniqueJoinCode, formatJoinCode } from "../utils/joinCode.js";
-import { BUSINESS_PLANS, planById, assertSeatAvailable } from "../utils/plans.js";
+import { ACTIVE_PLANS, planById, choosablePlan, assertSeatAvailable } from "../utils/plans.js";
 import { notifyJoinDecision, notifyListingDecision } from "../utils/notify.js";
 import { ensureStorageKnown, recalculateStorage, storageLimitBytes } from "../utils/storage.js";
 import { logger } from "../utils/logger.js";
@@ -207,14 +207,14 @@ router.get("/billing", async (req, res) => {
   await ensureStorageKnown(company);
   res.json({
     plan: company.billing?.plan || null, requestedPlan: company.billing?.requestedPlan || null, status: company.billing?.status || "active",
-    planDetails: planById(company.billing?.plan), plans: BUSINESS_PLANS,
+    planDetails: planById(company.billing?.plan), plans: ACTIVE_PLANS.concat(planById(company.billing?.plan)?.retired ? [planById(company.billing.plan)] : []),
     usage: { seats, forms, storageBytes: company.storage.bytes, storageLimitBytes: storageLimitBytes(company), ownDatabase: !!company.customUriEncrypted },
   });
 });
 
 router.put("/billing/plan-request", async (req, res) => {
   const company = await myCompany(req);
-  if (!planById(req.body?.plan)) throw httpError(400, "Choose one of the plans.");
+  if (!choosablePlan(req.body?.plan, company.billing?.plan)) throw httpError(400, "Choose one of the plans.");
   company.billing.requestedPlan = req.body.plan;
   await company.save();
   logger.info("admin", `Plan change requested: ${req.body.plan}`, { req, meta: { companyId: company._id } });

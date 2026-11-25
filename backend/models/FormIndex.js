@@ -56,6 +56,18 @@ const FormIndexSchema = new mongoose.Schema(
       requestedAt: { type: Date, default: null },
       decidedBy: { type: String, default: null },
     },
+    // Review before publishing: an editor asks a team's reviewers to look at the form; one reviewer decides.
+    // status: "none" | "requested" | "approved" | "changes_requested". Stores ids and a short note only.
+    review: {
+      status: { type: String, enum: ["none", "requested", "approved", "changes_requested"], default: "none" },
+      teamId: { type: String, default: null },
+      requestedBy: { type: String, default: null },
+      requestedAt: { type: Date, default: null },
+      requestNote: { type: String, default: "", maxlength: 500 },
+      decidedBy: { type: String, default: null },
+      decidedAt: { type: Date, default: null },
+      note: { type: String, default: "", maxlength: 1000 },
+    },
     // Pending "can I get access?" requests from teammates.
     accessRequests: {
       type: [new mongoose.Schema(
@@ -76,6 +88,7 @@ FormIndexSchema.index({ isPublic: 1, publishedAt: -1 });
 FormIndexSchema.index({ "collaborators.userId": 1 });
 FormIndexSchema.index({ "teamShares.teamId": 1 });
 FormIndexSchema.index({ "listing.status": 1, companyId: 1 });
+FormIndexSchema.index({ "review.status": 1, "review.teamId": 1 });
 
 const FormIndex = mongoose.model("FormIndex", FormIndexSchema);
 export default FormIndex;

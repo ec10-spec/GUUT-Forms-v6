@@ -21,6 +21,12 @@ const P = {
   back: <path d="m14 6-6 6 6 6" />,
   chevron: <path d="m9 6 6 6-6 6" />,
   spark: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18" />,
+  chat: <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />,
+  history: <><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" /><path d="M4 4v4.5h4.5M12 8v4l3 2" /></>,
+  newChat: <><path d="M12 5v14M5 12h14" /></>,
+  send: <path d="M5 12h12M12 6l6 6-6 6" />,
+  trash: <><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></>,
+  review: <><path d="M5 12.5 9.5 17 19 7.5" /></>,
 };
 
 export default function Icon({ name, size = 18, className = "" }) {

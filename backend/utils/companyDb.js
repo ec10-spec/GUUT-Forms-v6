@@ -1,3 +1,4 @@
+import User from "../models/User.js";
 import FormIndex from "../models/FormIndex.js";
 import { getTenant, dropTenant, openVerifiedConnection, tenantFromConnection } from "../config/db.js";
 import { encrypt } from "./crypto.js";
@@ -64,6 +65,13 @@ export async function copyCompanyData(companyId, from, to) {
       }
     }
   }
+  // GUUT AI conversations belong to the company's people, not to one form.
+  stats.assistantChats = 0;
+  const people = (await User.find({ companyId }).select("_id").lean()).map((u) => String(u._id));
+  if (people.length && from.AssistantChat && to.AssistantChat) {
+    await insert(to.AssistantChat, await from.AssistantChat.find({ userId: { $in: people } }).lean(), "assistantChats");
+  }
+  stats.people = people;
   // Prove the copy is complete before anyone deletes the source.
   let srcSubs = 0;
   for (let i = 0; i < ids.length; i += 100) srcSubs += await from.Submission.countDocuments({ formId: { $in: ids.slice(i, i + 100) } });
@@ -101,9 +109,11 @@ export async function linkDatabase({ company, rawUri, migrate, req }) {
           }
           await source.Form.deleteMany({ _id: { $in: chunk } });
         }
+        if (migrated.people?.length) await source.AssistantChat.deleteMany({ userId: { $in: migrated.people } });
         migrated.removedFromHosted = true;
       }
       delete migrated.sourceIds;
+      delete migrated.people;
     }
   } finally {
     await conn.close();

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
 import { decrypt } from "../utils/crypto.js";
-import { FormSchema, SubmissionSchema, AnalysisChatSchema } from "../models/tenantSchemas.js";
+import { FormSchema, SubmissionSchema, AnalysisChatSchema, AssistantChatSchema } from "../models/tenantSchemas.js";
 import { isProd } from "./env.js";
 import { httpError } from "../utils/http.js";
 
@@ -64,6 +64,7 @@ function modelsFor(conn) {
     Form: conn.models.Form || conn.model("Form", FormSchema),
     Submission: conn.models.Submission || conn.model("Submission", SubmissionSchema),
     AnalysisChat: conn.models.AnalysisChat || conn.model("AnalysisChat", AnalysisChatSchema),
+    AssistantChat: conn.models.AssistantChat || conn.model("AssistantChat", AssistantChatSchema),
   };
 }
 

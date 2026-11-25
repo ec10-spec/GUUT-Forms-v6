@@ -102,3 +102,27 @@ export const AnalysisChatSchema = new mongoose.Schema(
   { timestamps: true }
 );
 AnalysisChatSchema.index({ formId: 1, userId: 1, updatedAt: -1 });
+
+// GUUT AI (the app-wide assistant): one document per conversation, per person. Kept in the person's own
+// workspace database because it can quote their forms. Only saved when the person keeps history on.
+export const AssistantChatSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true },
+    title: { type: String, default: "New chat" },
+    messages: [
+      {
+        _id: false,
+        role: { type: String, enum: ["user", "assistant"], required: true },
+        content: { type: String, required: true },
+        at: { type: Date, default: Date.now },
+        // Buttons the assistant offered with this reply (open a form, apply edits...). Stored so a reopened chat shows them.
+        actions: { type: mongoose.Schema.Types.Mixed, default: undefined },
+        formId: { type: String, default: null }, // the form that was open when this was asked
+      },
+    ],
+    inputTokens: { type: Number, default: 0 },
+    outputTokens: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
+AssistantChatSchema.index({ userId: 1, updatedAt: -1 });

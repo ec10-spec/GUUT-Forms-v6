@@ -13,6 +13,8 @@ import { attachUser } from "./middleware/auth.js";
 import { logger, log, requestLogger } from "./utils/logger.js";
 import { ensureSuperadmin, migrateLegacyData } from "./utils/bootstrap.js";
 import authRouter from "./routes/auth.js";
+import oauthRouter from "./routes/oauth.js";
+import assistantRouter from "./routes/assistant.js";
 import formsRouter from "./routes/forms.js";
 import submissionsRouter from "./routes/submissions.js";
 import aiRouter from "./routes/ai.js";
@@ -74,7 +76,9 @@ app.use("/api/cron", cronRouter);
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 1500, standardHeaders: true, legacyHeaders: false }));
 app.use("/api", attachUser, requestLogger);
 
+app.use("/api/auth/oauth", oauthRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/assistant", assistantRouter);
 app.use("/api/forms", formsRouter);
 app.use("/api/submissions", submissionsRouter);
 app.use("/api/ai", aiRouter);

@@ -82,6 +82,33 @@ export const api = {
   teamEligible: (id) => request(`/teams/${id}/eligible`),
   teamAddMember: (id, email) => request(`/teams/${id}/members`, json("POST", { email })),
   teamRemoveMember: (id, userId) => request(`/teams/${id}/members/${userId}`, { method: "DELETE" }),
+  teamSetRole: (id, userId, role) => request(`/teams/${id}/members/${userId}`, json("PUT", { role })),
+  reviewRequest: (formId, teamId, note) => request(`/sharing/forms/${formId}/review`, json("POST", { teamId, note })),
+  reviewDecide: (formId, decision, note) => request(`/sharing/forms/${formId}/review/decide`, json("POST", { decision, note })),
+  reviewClear: (formId) => request(`/sharing/forms/${formId}/review`, { method: "DELETE" }),
+  reviewsForMe: () => request("/sharing/reviews"),
+  upgrade: (payload) => request("/auth/upgrade", json("POST", payload)),
+
+  // sign in with Google / Microsoft / Apple
+  oauthProviders: () => request("/auth/oauth/providers"),
+  oauthExchange: (ticket) => request("/auth/oauth/exchange", json("POST", { ticket })),
+  oauthLinkTicket: () => request("/auth/oauth/link-ticket", { method: "POST" }),
+  oauthUnlink: (provider) => request(`/auth/oauth/${provider}`, { method: "DELETE" }),
+  /** Full-page navigation to the provider. extra: { type, companyName, plan, joinCode, link } */
+  oauthStartUrl: (provider, extra = {}) => {
+    const q = new URLSearchParams(Object.entries(extra).filter(([, v]) => v)).toString();
+    return `${BASE}/auth/oauth/${provider}/start${q ? `?${q}` : ""}`;
+  },
+
+  // GUUT AI assistant
+  assistantStatus: () => request("/assistant/status"),
+  assistantChat: (payload) => request("/assistant/chat", json("POST", { tz: tz(), ...payload })),
+  assistantChats: () => request("/assistant/chats"),
+  assistantChatGet: (id) => request(`/assistant/chats/${id}`),
+  assistantChatRename: (id, title) => request(`/assistant/chats/${id}`, json("PATCH", { title })),
+  assistantChatDelete: (id) => request(`/assistant/chats/${id}`, { method: "DELETE" }),
+  assistantClearHistory: () => request("/assistant/chats", { method: "DELETE" }),
+  assistantSettings: (saveHistory) => request("/assistant/settings", json("PUT", { saveHistory })),
   shareTeamAdd: (id, teamId, role) => request(`/sharing/forms/${id}/teams`, json("POST", { teamId, role })),
   shareTeamRole: (id, teamId, role) => request(`/sharing/forms/${id}/teams/${teamId}`, json("PUT", { role })),
   shareTeamRemove: (id, teamId) => request(`/sharing/forms/${id}/teams/${teamId}`, { method: "DELETE" }),

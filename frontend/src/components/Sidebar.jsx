@@ -53,6 +53,7 @@ export default function Sidebar({ user, route, open, onClose, onNavigate, onNewF
               {item("/settings", "settings", "Settings", on("settings"))}
               {item("/about", "about", "About", on("about"))}
             </nav>
+            <a className="side-legal" href="#/privacy">Privacy policy</a>
 
             <div className="side-user">
               <span className="avatar">{(user.name || user.email || "?")[0].toUpperCase()}</span>

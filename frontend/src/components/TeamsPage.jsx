@@ -32,7 +32,9 @@ export default function TeamsPage({ user }) {
           ? "A team is a named group in your company, like Marketing. Anyone can create one and add colleagues. "
           : "A team is a group of people, like a study group, a club or friends. Add anyone who has a GUUT Forms account. "}
         Share a form with a team from the form's Share menu and everyone in it gets access, now and as people join or leave.
+        Mark members as <strong>Reviewers</strong> and editors can ask them to review a form before it goes out.
       </p>
+      <ReviewQueue />
       {error && <p className="error">{error}</p>}
       <form className="inline-form wrap" onSubmit={create}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={business ? "New team name (for example Marketing)" : "New team name (for example Study group)"} maxLength={60} required />
@@ -79,7 +81,7 @@ function TeamCard({ t, open, onToggle, onChanged }) {
       <div className="admin-card-head" onClick={onToggle} style={{ cursor: "pointer" }}>
         <div>
           <strong>{t.name}</strong>
-          <span className="admin-meta">{t.memberCount} member{t.memberCount === 1 ? "" : "s"}{t.createdBy ? ` · created by ${t.createdBy.name || t.createdBy.email}` : ""}{t.isMember ? " · you're in this team" : ""}</span>
+          <span className="admin-meta">{t.memberCount} member{t.memberCount === 1 ? "" : "s"}{t.reviewerCount ? ` · ${t.reviewerCount} reviewer${t.reviewerCount === 1 ? "" : "s"}` : ""}{t.createdBy ? ` · created by ${t.createdBy.name || t.createdBy.email}` : ""}{t.isReviewer ? " · you're a reviewer" : t.isMember ? " · you're in this team" : ""}</span>
         </div>
         <span className="share-row-action">{open ? "Hide" : "Open"}</span>
       </div>
@@ -105,6 +107,12 @@ function TeamCard({ t, open, onToggle, onChanged }) {
               {d.members.map((m) => (
                 <div key={m._id} className="people-row">
                   <div><strong>{m.name || m.email}</strong><span>{m.email}</span></div>
+                  {d.canManage ? (
+                    <select className="role-select" value={m.role || "member"} disabled={busy} aria-label={`Role for ${m.name || m.email}`} onChange={(e) => run(() => api.teamSetRole(t._id, m._id, e.target.value))}>
+                      <option value="member">Member</option>
+                      <option value="reviewer">Reviewer</option>
+                    </select>
+                  ) : m.role === "reviewer" && <span className="access-badge subtle">Reviewer</span>}
                   {(d.canManage || m._id === me) && (
                     <button className="small" disabled={busy} onClick={() => run(() => api.teamRemoveMember(t._id, m._id))}>
                       {m._id === me && !d.canManage ? "Leave" : "Remove"}
@@ -116,6 +124,24 @@ function TeamCard({ t, open, onToggle, onChanged }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Forms waiting for my review (only shown to people who are a reviewer in some team). */
+function ReviewQueue() {
+  const [q, setQ] = useState(null);
+  useEffect(() => { api.reviewsForMe().then(setQ).catch(() => setQ(null)); }, []);
+  if (!q?.isReviewer) return null;
+  return (
+    <div className="review-queue">
+      <h2 className="settings-subhead">Waiting for your review</h2>
+      {!q.forms.length ? <p className="empty-hint">Nothing to review right now.</p> : q.forms.map((f) => (
+        <div key={f._id} className="people-row">
+          <div><strong>{f.title}</strong><span>{f.team} · asked by {f.requestedBy?.name || f.requestedBy?.email || "a teammate"}{f.requestNote ? `: ${f.requestNote}` : ""}</span></div>
+          <a className="secondary small btn-link" href={`#/edit/${f._id}`}>Review</a>
+        </div>
+      ))}
     </div>
   );
 }

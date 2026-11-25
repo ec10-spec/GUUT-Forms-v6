@@ -144,6 +144,7 @@ router.delete("/companies/:id/database", async (req, res) => {
   // there first (the original in their own database is left untouched).
   const copied = await copyCompanyData(company._id, await getTenant(company), hostedTenant());
   delete copied.sourceIds;
+  delete copied.people;
   company.customUriEncrypted = null;
   company.dbHost = company.dbName = null;
   await company.save();

@@ -12,7 +12,7 @@ import { mailEnabled } from "../utils/mailer.js";
 import { PROVIDERS } from "../utils/aiProviders.js";
 import { notifyJoinRequest } from "../utils/notify.js";
 import { normalizeJoinCode, uniqueJoinCode } from "../utils/joinCode.js";
-import { planById } from "../utils/plans.js";
+import { choosablePlan, planById } from "../utils/plans.js";
 import FormIndex from "../models/FormIndex.js";
 import { verificationRequired, issueVerification, findByToken, discardUnverified } from "../utils/emailVerification.js";
 import { mailEnabled as mailOn, sendMail, renderEmail, appUrl } from "../utils/mailer.js";
@@ -31,7 +31,7 @@ const authLimiter = rateLimit({
 });
 
 // What the client gets about the user, plus a safe summary of their own company.
-async function sessionUser(user) {
+export async function sessionUser(user) {
   const company = user.companyId ? await Company.findById(user.companyId) : null;
   const pending = user.membership?.requestedCompanyId ? await Company.findById(user.membership.requestedCompanyId).select("name") : null;
   return {
@@ -45,11 +45,50 @@ async function sessionUser(user) {
   };
 }
 
+const oauthConfigured = () => !!(process.env.GOOGLE_CLIENT_ID || process.env.MICROSOFT_CLIENT_ID || process.env.APPLE_CLIENT_ID);
+export const signupsOpen = () => String(process.env.SIGNUPS_ENABLED ?? "true").toLowerCase() !== "false";
 const signupLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, limit: Number(process.env.SIGNUP_RATE_LIMIT || 30), standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many sign-ups from this network. Try again later." },
 });
 const displayName = (name, email) => String(name || "").trim().slice(0, 80) || email.split("@")[0];
+
+/**
+ * Creates the account and its workspace. Shared by email sign-up and "Continue with Google / Microsoft / Apple".
+ *   individual: a personal workspace hosted by us
+ *   business:   a new company; the person becomes its admin
+ *   employee:   no workspace yet; waits for a company admin to approve the join request
+ */
+export async function createAccount({ type, email, name, passwordHash, emailVerified, companyName, plan, joinCode, oauth }) {
+  const nm = displayName(name, email);
+  const base = { email, name: nm, passwordHash, emailVerified, ...(oauth ? { oauth } : {}) };
+  let company = null;
+  let user;
+  if (type === "employee") {
+    const code = normalizeJoinCode(joinCode);
+    const target = code ? await Company.findOne({ joinCode: code, type: "business", joinEnabled: true }) : null;
+    // Same answer for a wrong code and a closed one.
+    if (!target) throw httpError(404, "That company code isn't valid, or the company isn't accepting new members.");
+    user = await User.create({ ...base, role: "user", companyId: null, membership: { status: "pending", requestedCompanyId: target._id, requestedAt: new Date() } });
+    // Admins are only told once the address is confirmed (see /verify), so a stranger can't spam them.
+    if (emailVerified) notifyJoinRequest({ company: target, requester: user });
+  } else if (type === "business") {
+    const cname = String(companyName || "").trim().slice(0, 80);
+    if (cname.length < 2) throw httpError(400, "Enter your company name.");
+    const planId = plan || "starter";
+    if (!choosablePlan(planId)) throw httpError(400, "Choose one of the plans.");
+    company = await Company.create({ name: cname, type: "business", joinCode: await uniqueJoinCode(), billing: { plan: planId, status: "trialing", updatedAt: new Date() } });
+    try {
+      user = await User.create({ ...base, role: "admin", companyId: company._id });
+    } catch (err) { await company.deleteOne().catch(() => {}); throw err; }
+  } else {
+    company = await Company.create({ name: `${nm}'s workspace`, type: "individual" });
+    try {
+      user = await User.create({ ...base, role: "user", companyId: company._id });
+    } catch (err) { await company.deleteOne().catch(() => {}); throw err; }
+  }
+  return { user, company };
+}
 
 // POST /api/auth/signup  { type: "individual" | "business" | "employee", email, password, name, ... }
 //   individual: { } -> a personal workspace hosted by us
@@ -57,7 +96,7 @@ const displayName = (name, email) => String(name || "").trim().slice(0, 80) || e
 //   employee:   { joinCode } -> waits for a company admin to approve
 // Anyone can sign up for themselves; the platform team does not create accounts.
 router.post("/signup", signupLimiter, async (req, res) => {
-  if (String(process.env.SIGNUPS_ENABLED ?? "true").toLowerCase() === "false") throw httpError(403, "Sign-ups are closed right now.");
+  if (!signupsOpen()) throw httpError(403, "Sign-ups are closed right now.");
   const { type, password, name, companyName, plan, joinCode } = req.body || {};
   const email = String(req.body?.email || "").trim().toLowerCase();
   if (!["individual", "business", "employee"].includes(type)) throw httpError(400, "Choose an account type.");
@@ -71,33 +110,7 @@ router.post("/signup", signupLimiter, async (req, res) => {
   // lock someone else's email by signing up with it). The newest sign-up replaces it.
   if (existingUser) await discardUnverified(existingUser);
   const passwordHash = await bcrypt.hash(password, 10);
-  const nm = displayName(name, email);
-
-  let company = null;
-  let user;
-  if (type === "employee") {
-    const code = normalizeJoinCode(joinCode);
-    const target = code ? await Company.findOne({ joinCode: code, type: "business", joinEnabled: true }) : null;
-    // Same answer for a wrong code and a closed one.
-    if (!target) throw httpError(404, "That company code isn't valid, or the company isn't accepting new members.");
-    user = await User.create({ email, name: nm, role: "user", companyId: null, passwordHash, emailVerified: !mustVerify, membership: { status: "pending", requestedCompanyId: target._id, requestedAt: new Date() } });
-    // Admins are only told once the address is confirmed (see /verify), so a stranger can't spam them.
-    if (!mustVerify) notifyJoinRequest({ company: target, requester: user });
-  } else if (type === "business") {
-    const cname = String(companyName || "").trim().slice(0, 80);
-    if (cname.length < 2) throw httpError(400, "Enter your company name.");
-    const planId = plan || "starter";
-    if (!planById(planId)) throw httpError(400, "Choose one of the plans.");
-    company = await Company.create({ name: cname, type: "business", joinCode: await uniqueJoinCode(), billing: { plan: planId, status: "trialing", updatedAt: new Date() } });
-    try {
-      user = await User.create({ email, name: nm, role: "admin", companyId: company._id, passwordHash, emailVerified: !mustVerify });
-    } catch (err) { await company.deleteOne().catch(() => {}); throw err; }
-  } else {
-    company = await Company.create({ name: `${nm}'s workspace`, type: "individual" });
-    try {
-      user = await User.create({ email, name: nm, role: "user", companyId: company._id, passwordHash, emailVerified: !mustVerify });
-    } catch (err) { await company.deleteOne().catch(() => {}); throw err; }
-  }
+  const { user, company } = await createAccount({ type, email, name, passwordHash, emailVerified: !mustVerify, companyName, plan, joinCode });
   req.userId = String(user._id);
   logger.info("auth", `Sign-up (${type}): ${user.email}`, { req, meta: { companyId: company?._id || null, verified: !mustVerify } });
   if (mustVerify) {
@@ -189,6 +202,32 @@ router.post("/continue-individual", requireAuth, async (req, res) => {
   res.json({ user: await sessionUser(user) });
 });
 
+// POST /api/auth/upgrade { companyName, plan? }
+// One sign-up for everyone: an individual account turns its own workspace into a business (Teams plan)
+// without a new account. Forms, responses and shares stay where they are; the person becomes the admin.
+router.post("/upgrade", requireAuth, async (req, res) => {
+  const user = req.user;
+  if (user.role === "superadmin") throw httpError(403, "Platform accounts can't be upgraded.");
+  const company = user.companyId ? await Company.findById(user.companyId) : null;
+  if (!company) throw httpError(400, "Your account is waiting for a company admin, so it can't be upgraded.");
+  if (company.type === "business") throw httpError(400, "Your workspace is already on a team plan. A company admin can change the plan in Admin, Billing.");
+  const name = String(req.body?.companyName || "").trim().replace(/\s+/g, " ").slice(0, 80);
+  if (name.length < 2) throw httpError(400, "Enter your team or company name.");
+  const planId = req.body?.plan || "starter";
+  if (!choosablePlan(planId) || planById(planId)?.contact) throw httpError(400, "Choose the Teams plan, or contact us for Servers.");
+  company.name = name;
+  company.type = "business";
+  company.joinCode = await uniqueJoinCode();
+  company.joinEnabled = true;
+  company.billing = { plan: planId, requestedPlan: null, status: "trialing", updatedAt: new Date() };
+  await company.save();
+  user.role = "admin";
+  user.membership = { status: "active", requestedCompanyId: null, requestedAt: null }; // drop any pending join request
+  await user.save();
+  logger.info("auth", `Upgraded to ${planId}: ${user.email}`, { req, meta: { companyId: company._id } });
+  res.json({ user: await sessionUser(user) });
+});
+
 // POST /api/auth/login   { email, password }
 // One login for everyone: platform team, company admins and users. The server decides
 // what each person sees from their role; the client never picks a "door".
@@ -199,7 +238,8 @@ router.post("/login", authLimiter, async (req, res) => {
   const ok = user && user.active && (await bcrypt.compare(password, user.passwordHash));
   if (!ok) {
     logger.warn("auth", `Failed login: ${email.toLowerCase()}`, { req, statusCode: 401, meta: { reason: !user ? "unknown email" : !user.active ? "disabled" : "bad password" } });
-    throw httpError(401, "Incorrect email or password.");
+    // Same message whether or not the account exists. Accounts made with Google, Microsoft or Apple have no password yet.
+    throw httpError(401, oauthConfigured() ? "Incorrect email or password. If you signed up with Google, Microsoft or Apple, use that button instead." : "Incorrect email or password.");
   }
   if (user.emailVerified === false) {
     throw httpError(403, "Please confirm your email first. We sent you a link when you signed up.", { code: "EMAIL_NOT_VERIFIED" });
@@ -251,6 +291,11 @@ router.put("/settings", requireAuth, async (req, res) => {
     }
   }
 
+  const assistant = req.body?.assistant;
+  if (assistant && typeof assistant === "object") {
+    if (assistant.saveHistory !== undefined) user.settings.assistantSaveHistory = !!assistant.saveHistory;
+  }
+
   if (notifications && typeof notifications === "object") {
     const n = user.notifications;
     if (notifications.formCreated !== undefined) n.formCreated = !!notifications.formCreated;
@@ -284,8 +329,11 @@ router.put("/settings", requireAuth, async (req, res) => {
 router.put("/password", requireAuth, authLimiter, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (typeof newPassword !== "string" || newPassword.length < MIN_PW) throw httpError(400, `New password must be at least ${MIN_PW} characters.`);
-  if (!(await bcrypt.compare(String(currentPassword || ""), req.user.passwordHash))) throw httpError(400, "Current password is incorrect.");
+  // Accounts created with Google, Microsoft or Apple have no password yet: they can set one without a current one.
+  const hasPassword = req.user.passwordSet !== false;
+  if (hasPassword && !(await bcrypt.compare(String(currentPassword || ""), req.user.passwordHash))) throw httpError(400, "Current password is incorrect.");
   req.user.setPasswordHash(await bcrypt.hash(newPassword, 10));
+  req.user.passwordSet = true;
   await req.user.save();
   logger.info("auth", "Password changed", { req });
   // Other devices are signed out; this one gets a fresh token so it stays signed in.
@@ -329,6 +377,7 @@ router.post("/reset", authLimiter, async (req, res) => {
     : null;
   if (!user || !user.active) throw httpError(400, "This reset link is invalid or has expired. Ask for a new one.", { code: "BAD_RESET_TOKEN" });
   user.setPasswordHash(await bcrypt.hash(password, 10));
+  user.passwordSet = true;
   user.emailVerified = true; // they proved they own the address
   await user.save();
   req.userId = String(user._id);

@@ -19,7 +19,9 @@ import PublicBar from "./components/PublicBar.jsx";
 import PricingPage from "./components/PricingPage.jsx";
 import ApprovalsPage from "./components/ApprovalsPage.jsx";
 import ResetPassword from "./components/ResetPassword.jsx";
-import { api, getUser, getToken, saveUser, clearSession } from "./api.js";
+import PrivacyPage, { LegalFooter } from "./components/PrivacyPage.jsx";
+import GuutAssistant from "./components/GuutAssistant.jsx";
+import { api, getUser, getToken, saveUser, saveSession, clearSession } from "./api.js";
 import { confirmLeave } from "./lib/navGuard.js";
 
 /** Parses the hash into a route. Real routes so browser back/forward work. */
@@ -35,6 +37,8 @@ function parseHash(hash) {
   if (h === "/teams") return { name: "teams" };
   if (h === "/pricing") return { name: "pricing" };
   if (h === "/approvals") return { name: "approvals" };
+  if (h === "/privacy") return { name: "privacy" };
+  if (h.startsWith("/oauth?")) return { name: "oauth", params: Object.fromEntries(new URLSearchParams(h.slice(7))) };
   const joinMatch = h.match(/^\/join\/([A-Za-z0-9-]{4,24})$/);
   if (joinMatch) return { name: "join", code: joinMatch[1] };
   if (h === "/new") return { name: "new" };
@@ -91,6 +95,49 @@ function JoinCompany({ code, user, onUser, onDone }) {
         </>
       )}
       {!bad && <button className="link-btn" onClick={onDone}>Not now</button>}
+    </div></div></div></div>
+  );
+}
+
+/**
+ * Back from Google / Microsoft / Apple. A ticket is swapped for a session; anything else is a message.
+ * The address is replaced so Back can't return to a used ticket.
+ */
+function OAuthReturn({ params, onAuth, onError, onDone }) {
+  const [msg, setMsg] = useState(null);
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    (async () => {
+      if (params.linked) {
+        try { sessionStorage.setItem("guut_oauth_msg", JSON.stringify({ ok: true, text: `${params.linked[0].toUpperCase()}${params.linked.slice(1)} sign-in connected.` })); } catch { /* ignore */ }
+        onDone("/settings/account"); return;
+      }
+      if (params.error && params.link) {
+        try { sessionStorage.setItem("guut_oauth_msg", JSON.stringify({ ok: false, text: params.error })); } catch { /* ignore */ }
+        onDone("/settings/account"); return;
+      }
+      if (params.verify) { setMsg(`Almost done. We sent a confirmation link to ${params.verify}. Open it to finish creating your account.`); return; }
+      if (params.error || !params.ticket) { onError(params.error || "Sign-in didn't finish. Please try again."); return; }
+      try {
+        const res = await api.oauthExchange(params.ticket);
+        saveSession(res);
+        let user = res.user;
+        // Signed in from a company invite link: send the join request now.
+        let join = null;
+        try { join = sessionStorage.getItem("guut_oauth_join"); sessionStorage.removeItem("guut_oauth_join"); } catch { /* ignore */ }
+        if (join && user.companyId && user.company?.type !== "business" && !params.created) {
+          try { user = (await api.requestJoin(join)).user; saveUser(user); } catch { /* shown on the join page instead */ }
+        }
+        onAuth(user);
+      } catch (err) { onError(err.message); }
+    })();
+  }, [params, onAuth, onError, onDone]);
+  return (
+    <div className="auth-page"><div className="auth-center"><div className="auth-side"><div className="auth-card">
+      <Logo variant="horizontal" height={30} className="auth-card-logo" />
+      {msg ? (<><h2 className="auth-title">Check your email</h2><p className="auth-sub">{msg}</p><button className="link-btn" onClick={() => onDone("/")}>Back to sign in</button></>) : <p className="auth-sub">Signing you in...</p>}
     </div></div></div></div>
   );
 }
@@ -182,6 +229,13 @@ export default function App() {
   const [authInitial, setAuthInitial] = useState({});
   const [approvalCount, setApprovalCount] = useState(0);
   const pendingDraft = useRef(null); // unsaved draft for the "/new" route, not URL-addressable
+  const builderState = useRef(null); // what the open builder shows, for GUUT AI
+  const [draftKey, setDraftKey] = useState(0); // a new draft opened while already on /new remounts the builder
+  useEffect(() => {
+    const on = (e) => { builderState.current = e.detail || null; };
+    window.addEventListener("guut:builder-state", on);
+    return () => window.removeEventListener("guut:builder-state", on);
+  }, []);
 
   // Every in-app link changes the hash. If the builder has unsaved changes, ask first; staying puts the
   // previous address back without reloading anything.
@@ -266,8 +320,16 @@ export default function App() {
     setRoute(parseHash("#/"));
   }
 
+  function leaveOAuth(hash, initial) {
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${hash}`);
+    lastHash.current = `#${hash}`;
+    if (initial) setAuthInitial(initial);
+    setRoute(parseHash(`#${hash}`));
+  }
+
   function startBlankForm() {
     pendingDraft.current = { title: "Untitled Form", description: "", fields: [], source: "manual", generationPrompt: null };
+    setDraftKey((k) => k + 1);
     navigate("/new");
   }
 
@@ -290,7 +352,7 @@ export default function App() {
 
   const inWorkspace = route.name === "new" || route.name === "edit";
   // The email-confirmation link must work for someone who is not signed in yet.
-  const isPublicRoute = ["about", "explore", "verify", "pricing", "reset", "forgot"].includes(route.name);
+  const isPublicRoute = ["about", "explore", "verify", "pricing", "reset", "forgot", "privacy", "oauth"].includes(route.name);
   const isBusiness = user?.company?.type === "business";
   const isCompanyAdmin = isBusiness && user?.role === "admin";
   const waiting = ["pending", "declined"].includes(user?.membership?.status) && !user?.companyId;
@@ -304,6 +366,7 @@ export default function App() {
     ...(user?.role === "superadmin" || user?.role === "admin" ? [{ hash: "/admin", label: "Admin", icon: "admin" }] : []),
     { hash: "/settings", label: "Settings", icon: "settings" },
     { hash: "/about", label: "About", icon: "about" },
+    { hash: "/privacy", label: "Privacy policy", icon: "about" },
   ];
   const showSidebar = !!user && !waiting; // signed-out visitors get the top bar instead
 
@@ -332,7 +395,14 @@ export default function App() {
             <button className="link-btn" onClick={() => api.cancelJoin().then(({ user: u }) => { saveUser(u); setUser(u); }).catch(() => {})}>Cancel request</button>
           </div>
         )}
-        {route.name === "join" ? (
+        {route.name === "oauth" ? (
+          <OAuthReturn
+            params={route.params}
+            onAuth={(u) => { setUser(u); leaveOAuth("/"); }}
+            onError={(message) => { clearSession(); setUser(null); leaveOAuth("/", { error: message, at: Date.now() }); }}
+            onDone={(hash) => leaveOAuth(hash)}
+          />
+        ) : route.name === "join" ? (
           user && !waiting ? (
             <JoinCompany code={route.code} user={user} onUser={setUser} onDone={() => navigate("/")} />
           ) : (
@@ -362,8 +432,10 @@ export default function App() {
 
             {route.name === "about" && <AboutPage />}
 
+            {route.name === "privacy" && <PrivacyPage />}
+
             {route.name === "pricing" && (
-              <PricingPage user={user} onChoose={(kind, plan) => {
+              <PricingPage user={user} onUser={setUser} onChoose={(kind, plan) => {
                 if (user) { navigate(user.role === "admin" && user.company?.type === "business" ? "/admin" : "/"); return; }
                 setAuthInitial({ mode: "create", type: kind, plan }); navigate("/");
               }} />
@@ -396,6 +468,7 @@ export default function App() {
             {route.name === "new" && (
               pendingDraft.current ? (
                 <FormBuilder
+                  key={draftKey}
                   draft={pendingDraft.current}
                   formId={null}
                   onSaved={(saved) => { setActiveForm(saved); navigate(`/edit/${saved._id}`); }}
@@ -419,9 +492,16 @@ export default function App() {
         )}
       </main>
 
+      {!user && ["about", "explore", "pricing", "privacy"].includes(route.name) && <LegalFooter />}
       <ReportWidget />
         </div>
       </div>
+      {showSidebar && (
+        <GuutAssistant
+          user={user} route={route} builder={builderState} onNavigate={navigate}
+          onOpenDraft={(draft) => { pendingDraft.current = draft; setDraftKey((k) => k + 1); navigate("/new"); }}
+        />
+      )}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} pages={pages} onGo={navigate} />
     </div>
   );

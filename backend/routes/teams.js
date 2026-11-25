@@ -26,6 +26,8 @@ const brief = (u) => (u ? { _id: String(u._id), name: u.name || "", email: u.ema
 const sameCompany = (req, t) => String(t.companyId) === String(req.user.companyId);
 const canManage = (req, team) => team.createdBy === req.userId || (req.user.role === "admin" && !team.open && sameCompany(req, team));
 const isMember = (req, t) => t.members.some((m) => m.userId === req.userId);
+const isReviewer = (req, t) => t.members.some((m) => m.userId === req.userId && m.role === "reviewer");
+const reviewerCount = (t) => t.members.filter((m) => m.role === "reviewer").length;
 
 async function loadTeam(req, id) {
   if (!mongoose.isValidObjectId(id)) throw httpError(404, "Team not found");
@@ -45,7 +47,7 @@ async function cleanName(req, raw, exceptId) {
 }
 const view = (req, t, creators) => ({
   _id: String(t._id), name: t.name, open: !!t.open, memberCount: t.members.length,
-  isMember: isMember(req, t), canManage: canManage(req, t),
+  isMember: isMember(req, t), isReviewer: isReviewer(req, t), reviewerCount: reviewerCount(t), canManage: canManage(req, t),
   createdBy: brief(creators?.get(t.createdBy)),
 });
 async function creatorsOf(teams) {
@@ -78,7 +80,7 @@ router.get("/:id", async (req, res) => {
   const team = await loadTeam(req, req.params.id);
   const users = new Map((await User.find({ _id: { $in: team.members.map((m) => m.userId).filter((x) => mongoose.isValidObjectId(x)) } }).select("name email")).map((u) => [String(u._id), u]));
   const creators = await creatorsOf([team]);
-  res.json({ ...view(req, team, creators), members: team.members.filter((m) => users.has(m.userId)).map((m) => ({ ...brief(users.get(m.userId)), addedAt: m.addedAt })) });
+  res.json({ ...view(req, team, creators), members: team.members.filter((m) => users.has(m.userId)).map((m) => ({ ...brief(users.get(m.userId)), role: m.role || "member", addedAt: m.addedAt })) });
 });
 
 router.put("/:id", async (req, res) => {
@@ -97,6 +99,7 @@ router.delete("/:id", async (req, res) => {
   const id = String(team._id);
   for (const idx of await FormIndex.find({ "teamShares.teamId": id })) {
     idx.teamShares = idx.teamShares.filter((s) => s.teamId !== id);
+    if (idx.review?.teamId === id) idx.review = { status: "none", teamId: null, requestedBy: null, requestedAt: null, requestNote: "", decidedBy: null, decidedAt: null, note: "" };
     await idx.save();
   }
   await team.deleteOne();
@@ -125,11 +128,26 @@ router.post("/:id/members", async (req, res) => {
   }
   if (!team.members.some((m) => m.userId === String(user._id))) {
     if (team.members.length >= 500) throw httpError(400, "A team can have up to 500 members.");
-    team.members.push({ userId: String(user._id), addedBy: req.userId });
+    team.members.push({ userId: String(user._id), role: req.body?.role === "reviewer" ? "reviewer" : "member", addedBy: req.userId });
     await team.save();
     notifyTeamAdded({ team, user, addedBy: req.user });
   }
   res.status(201).json({ ok: true, memberCount: team.members.length });
+});
+
+// PUT /api/teams/:id/members/:userId { role: "member" | "reviewer" }
+router.put("/:id/members/:userId", async (req, res) => {
+  const team = await loadTeam(req, req.params.id);
+  assertManage(req, team);
+  const role = req.body?.role;
+  if (!["member", "reviewer"].includes(role)) throw httpError(400, "Choose Member or Reviewer.");
+  const m = team.members.find((x) => x.userId === req.params.userId);
+  if (!m) throw httpError(404, "That person isn't in this team.");
+  m.role = role;
+  team.markModified("members");
+  await team.save();
+  logger.info("team", `Team role changed: ${team.name}`, { req, meta: { userId: req.params.userId, role } });
+  res.json({ ok: true, role, reviewerCount: reviewerCount(team) });
 });
 
 router.delete("/:id/members/:userId", async (req, res) => {

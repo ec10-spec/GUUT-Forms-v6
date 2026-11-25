@@ -425,6 +425,94 @@ try {
   check("generated HTML has one script that parses (title with </script> is escaped)", scripts.length === 1 && parses);
   check("generated HTML posts to the given API base", html.includes('"https://guut.example.test"') && html.includes(hid));
 
+  suite("v12: pricing tiers, upgrade, team reviewers, GUUT AI, sign-in providers");
+  const plansNow = (await api("GET", "/plans")).body;
+  check("pricing shows Freemium, Teams and Servers", plansNow?.individual?.name === "Freemium" && plansNow.business.map((p) => p.name).join(",") === "Teams,Servers", plansNow);
+  check("retired plan is hidden but still known", !plansNow.business.some((p) => p.id === "growth"));
+  check("Teams is $29 for up to 10 people", plansNow.business[0].priceLabel === "$29 / month" && plansNow.business[0].maxSeats === 10);
+  check("new business cannot pick the retired plan", (await api("POST", "/auth/signup", { type: "business", email: "retired@z.co", password: pw, companyName: "Retired Co", plan: "growth" })).status === 400);
+
+  // Upgrade an individual to Teams without a new account.
+  const upg = await account(api, { type: "individual", email: "upgrader@x.co", password: pw, name: "Uma" });
+  const upForm = await api("POST", "/forms", form("Before upgrade"), upg.token);
+  check("individual creates a form before upgrading", upForm.status === 201, upForm.body);
+  check("upgrade needs a team name", (await api("POST", "/auth/upgrade", { companyName: "" }, upg.token)).status === 400);
+  check("upgrade to Servers is contact-only", (await api("POST", "/auth/upgrade", { companyName: "Uma Co", plan: "scale" }, upg.token)).status === 400);
+  const upgraded = await api("POST", "/auth/upgrade", { companyName: "Uma Co" }, upg.token);
+  check("individual upgrades to Teams", upgraded.status === 200 && upgraded.body.user.role === "admin" && upgraded.body.user.company.type === "business" && upgraded.body.user.company.plan === "starter", upgraded.body);
+  check("forms stay after upgrade", JSON.stringify((await api("GET", "/forms", undefined, upg.token)).body).includes("Before upgrade"));
+  check("upgraded company has a join link", !!(await api("GET", "/company/join", undefined, upg.token)).body?.code);
+  check("cannot upgrade twice", (await api("POST", "/auth/upgrade", { companyName: "Again" }, upg.token)).status === 400);
+
+  // Team reviewers: col is in team "Sales" (t) and f2 is shared with that team as viewer.
+  check("non-manager cannot set roles", (await api("PUT", `/teams/${t.body._id}/members/${emp.id}`, { role: "reviewer" }, col.token)).status === 403);
+  check("bad role rejected", (await api("PUT", `/teams/${t.body._id}/members/${emp.id}`, { role: "boss" }, emp.token)).status === 400);
+  const colId = (await api("GET", "/auth/me", undefined, col.token)).body.user._id;
+  const noReviewers = await api("POST", `/sharing/forms/${f2.body._id}/review`, { teamId: t.body._id }, emp.token);
+  check("review needs a team with reviewers", noReviewers.status === 400, noReviewers.body);
+  const setRole = await api("PUT", `/teams/${t.body._id}/members/${colId}`, { role: "reviewer" }, emp.token);
+  check("manager makes a member a reviewer", setRole.status === 200 && setRole.body.reviewerCount === 1, setRole.body);
+  const teamView = await api("GET", `/teams/${t.body._id}`, undefined, emp.token);
+  check("team shows member roles", teamView.body.members.some((m) => m._id === colId && m.role === "reviewer"), teamView.body);
+  check("viewer cannot ask for a review", (await api("POST", `/sharing/forms/${f2.body._id}/review`, { teamId: t.body._id }, col.token)).status === 403);
+  check("review only from a team the form is shared with", (await api("POST", `/sharing/forms/${f2.body._id}/review`, { teamId: "64b000000000000000000000" }, emp.token)).status === 400);
+  const rq = await api("POST", `/sharing/forms/${f2.body._id}/review`, { teamId: t.body._id, note: "Check question 2" }, emp.token);
+  check("editor asks the team's reviewers", rq.status === 200 && rq.body.review.status === "requested" && rq.body.review.team?.name === "Sales", rq.body);
+  const queue = await api("GET", "/sharing/reviews", undefined, col.token);
+  check("reviewer sees the form in their queue", queue.body?.isReviewer && queue.body.forms.some((f) => f._id === f2.body._id && f.requestNote === "Check question 2"), queue.body);
+  check("non-reviewer cannot decide", (await api("POST", `/sharing/forms/${f2.body._id}/review/decide`, { decision: "approve" }, emp.token)).status === 403);
+  check("asking for changes needs a note", (await api("POST", `/sharing/forms/${f2.body._id}/review/decide`, { decision: "changes" }, col.token)).status === 400);
+  const changes = await api("POST", `/sharing/forms/${f2.body._id}/review/decide`, { decision: "changes", note: "Shorter labels" }, col.token);
+  check("reviewer requests changes", changes.status === 200 && changes.body.review.status === "changes_requested" && changes.body.review.note === "Shorter labels", changes.body);
+  check("no open request after a decision", (await api("POST", `/sharing/forms/${f2.body._id}/review/decide`, { decision: "approve" }, col.token)).status === 400);
+  await api("POST", `/sharing/forms/${f2.body._id}/review`, { teamId: t.body._id }, emp.token);
+  const approved = await api("POST", `/sharing/forms/${f2.body._id}/review/decide`, { decision: "approve" }, col.token);
+  check("reviewer approves", approved.status === 200 && approved.body.review.status === "approved" && approved.body.review.decidedBy?.email === "col@a.co", approved.body);
+  const revInfo = await api("GET", `/sharing/forms/${f2.body._id}`, undefined, col.token);
+  check("share info carries the review for reviewers", revInfo.body.review?.status === "approved" && revInfo.body.review.amReviewer === true, revInfo.body.review);
+  check("other company cannot touch the review", (await api("POST", `/sharing/forms/${f2.body._id}/review`, { teamId: t.body._id }, adminB.token)).status === 404);
+  await api("POST", `/sharing/forms/${f2.body._id}/review`, { teamId: t.body._id }, emp.token);
+  await api("DELETE", `/sharing/forms/${f2.body._id}/teams/${t.body._id}`, undefined, emp.token);
+  check("unsharing the team clears an open review", (await api("GET", `/sharing/forms/${f2.body._id}`, undefined, emp.token)).body.review?.status === "none");
+
+  // GUUT AI without a key: status says not ready, chat explains how to fix it, history endpoints work.
+  const aiSt = await api("GET", "/assistant/status", undefined, emp.token);
+  check("assistant status without a key", aiSt.status === 200 && aiSt.body.aiReady === false && aiSt.body.saveHistory === true, aiSt.body);
+  const noKey = await api("POST", "/assistant/chat", { message: "hello" }, emp.token);
+  check("assistant asks for a key", noKey.status === 400 && noKey.body.code === "NO_API_KEY", noKey.body);
+  check("assistant needs a message", (await api("POST", "/assistant/chat", { message: " " }, emp.token)).status === 400);
+  check("assistant requires sign-in", (await api("GET", "/assistant/status")).status === 401);
+  check("assistant chat list starts empty", Array.isArray((await api("GET", "/assistant/chats", undefined, emp.token)).body));
+  check("unknown chat is a 404", (await api("GET", "/assistant/chats/64b000000000000000000000", undefined, emp.token)).status === 404);
+  const histOff = await api("PUT", "/assistant/settings", { saveHistory: false }, emp.token);
+  check("history can be switched off", histOff.status === 200 && (await api("GET", "/assistant/status", undefined, emp.token)).body.saveHistory === false);
+  check("history setting must be boolean", (await api("PUT", "/assistant/settings", { saveHistory: "no" }, emp.token)).status === 400);
+  await api("PUT", "/assistant/settings", { saveHistory: true }, emp.token);
+  check("clear all history", (await api("DELETE", "/assistant/chats", undefined, emp.token)).status === 200);
+  const { cleanEditFields } = await import(new URL("../routes/assistant.js", import.meta.url));
+  const edited = cleanEditFields([
+    { id: "Rate_1", type: "rating", label: "Rate us" },
+    { id: "new one", type: "textarea", label: "Why?", showIf: { fieldId: "Rate_1", op: "lte", values: ["2"] } },
+    { id: "pick", type: "select", label: "Pick" },
+  ], [{ id: "Rate_1", type: "rating", label: "Rate" }, { id: "pick", type: "select", label: "Pick", options: ["A"] }]);
+  check("AI edits keep existing question ids", edited[0].id === "Rate_1" && edited[2].id === "pick", edited);
+  check("AI edits keep conditions on kept questions", edited[1].showIf?.fieldId === "Rate_1" && edited[1].id === "new_one", edited[1]);
+  check("AI edits give choice questions options", edited[2].options.length >= 1);
+
+  // Sign-in providers: none configured in tests, so every start explains that instead of failing.
+  const prov = await api("GET", "/auth/oauth/providers");
+  check("providers listed (google, microsoft, apple)", prov.status === 200 && prov.body.map((p) => p.id).join(",") === "google,microsoft,apple" && prov.body.every((p) => p.enabled === false), prov.body);
+  const startOff = await fetch(S.base + "/api/auth/oauth/google/start", { redirect: "manual" });
+  check("unconfigured provider sends the person back with a message", startOff.status === 303 && /#\/oauth\?error=/.test(startOff.headers.get("location") || ""), startOff.headers.get("location"));
+  const cbBad = await fetch(S.base + "/api/auth/oauth/apple/callback", { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "state=x&code=y" });
+  check("callback without a valid state is refused", cbBad.status === 303 && /error=/.test(cbBad.headers.get("location") || ""));
+  check("bad ticket refused", (await api("POST", "/auth/oauth/exchange", { ticket: "nope" })).status === 400);
+  const lt = await api("POST", "/auth/oauth/link-ticket", {}, emp.token);
+  check("link ticket only for signed-in people", lt.status === 200 && !!lt.body.ticket && (await api("POST", "/auth/oauth/link-ticket", {})).status === 401);
+  check("cannot exchange a link ticket for a session", (await api("POST", "/auth/oauth/exchange", { ticket: lt.body.ticket })).status === 400);
+  check("disconnect works when a password exists", (await api("DELETE", "/auth/oauth/google", undefined, emp.token)).status === 200);
+  check("me lists sign-in methods", Array.isArray((await api("GET", "/auth/me", undefined, emp.token)).body.user.signInMethods));
+
   suite("platform admin");
   check("platform lists companies", (await api("GET", "/admin/companies", undefined, root.body.token)).status === 200);
 } catch (e) {

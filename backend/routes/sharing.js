@@ -6,8 +6,8 @@ import FormIndex from "../models/FormIndex.js";
 import Team from "../models/Team.js";
 import { requireAuth, tenantForCompanyId, isSuperadmin } from "../middleware/auth.js";
 import { getTenant } from "../config/db.js";
-import { accessOf, canManage, rankOf } from "../utils/access.js";
-import { notifyAccessRequest, notifyAccessDecision } from "../utils/notify.js";
+import { accessOf, canManage, canEdit, canView, rankOf } from "../utils/access.js";
+import { notifyAccessRequest, notifyAccessDecision, notifyReviewRequest, notifyReviewDecision } from "../utils/notify.js";
 import { httpError } from "../utils/http.js";
 import { logger } from "../utils/logger.js";
 
@@ -36,7 +36,7 @@ function assertManage(req, idx) {
 async function overview(req, idx) {
   const access = accessOf(req, idx);
   const owner = await User.findById(idx.ownerId).select("name email");
-  const out = { myAccess: access, canManage: canManage(access), owner: brief(owner) };
+  const out = { myAccess: access, canManage: canManage(access), owner: brief(owner), review: await reviewInfo(req, idx, access) };
   if (!out.canManage) return out;
   const ids = [...idx.collaborators.map((c) => c.userId), ...idx.accessRequests.map((r) => r.userId)];
   const users = new Map((await User.find({ _id: { $in: ids } }).select("name email")).map((u) => [String(u._id), u]));
@@ -54,6 +54,103 @@ async function overview(req, idx) {
   out.requests = idx.accessRequests.filter((r) => users.has(r.userId)).map((r) => ({ ...brief(users.get(r.userId)), role: r.role, message: r.message, createdAt: r.createdAt }));
   return out;
 }
+
+// ---- Team review. An editor asks the reviewers of a team the form is shared with to review it; any one of
+// them approves it or asks for changes. Review is advice to the team: it never blocks publishing.
+export const clearedReview = () => ({ status: "none", teamId: null, requestedBy: null, requestedAt: null, requestNote: "", decidedBy: null, decidedAt: null, note: "" });
+
+async function reviewInfo(req, idx, access) {
+  const r = idx.review || {};
+  const teamIds = (idx.teamShares || []).map((t) => t.teamId).filter((t) => mongoose.isValidObjectId(t));
+  const teams = teamIds.length ? await Team.find({ _id: { $in: teamIds } }).select("name members") : [];
+  const reviewTeams = teams.map((t) => ({ _id: String(t._id), name: t.name, reviewerCount: t.members.filter((m) => m.role === "reviewer").length })).filter((t) => t.reviewerCount > 0);
+  const reviewTeam = r.teamId ? teams.find((t) => String(t._id) === r.teamId) : null;
+  const people = [r.requestedBy, r.decidedBy].filter((x) => x && mongoose.isValidObjectId(x));
+  const users = new Map((await User.find({ _id: { $in: people } }).select("name email")).map((u) => [String(u._id), u]));
+  return {
+    status: r.status || "none",
+    team: reviewTeam ? { _id: String(reviewTeam._id), name: reviewTeam.name } : null,
+    requestedBy: brief(users.get(r.requestedBy)), requestedAt: r.requestedAt || null, requestNote: r.requestNote || "",
+    decidedBy: brief(users.get(r.decidedBy)), decidedAt: r.decidedAt || null, note: r.note || "",
+    reviewTeams,
+    canRequest: canEdit(access) && reviewTeams.length > 0,
+    amReviewer: !!reviewTeam && reviewTeam.members.some((m) => m.userId === req.userId && m.role === "reviewer"),
+  };
+}
+
+// POST /api/sharing/forms/:id/review { teamId, note? }: ask that team's reviewers.
+router.post("/forms/:id/review", async (req, res) => {
+  const idx = await loadIdx(req, req.params.id);
+  if (!canEdit(accessOf(req, idx))) throw httpError(403, "Only people who can edit this form can ask for a review.");
+  const teamId = String(req.body?.teamId || "");
+  if (!idx.teamShares.some((t) => t.teamId === teamId)) throw httpError(400, "Share the form with that team first.");
+  const team = mongoose.isValidObjectId(teamId) ? await Team.findById(teamId) : null;
+  if (!team || !team.members.some((m) => m.role === "reviewer")) throw httpError(400, "That team has no reviewers yet. A team manager can mark members as reviewers on the Teams page.");
+  idx.review = { status: "requested", teamId, requestedBy: req.userId, requestedAt: new Date(), requestNote: String(req.body?.note || "").trim().slice(0, 500), decidedBy: null, decidedAt: null, note: "" };
+  await idx.save();
+  logger.info("form", `Review requested from ${team.name}`, { req, meta: { formId: String(idx._id), teamId } });
+  notifyReviewRequest({ idx, team, requester: req.user });
+  res.json({ review: await reviewInfo(req, idx, accessOf(req, idx)) });
+});
+
+// POST /api/sharing/forms/:id/review/decide { decision: "approve" | "changes", note? }: reviewers only.
+router.post("/forms/:id/review/decide", async (req, res) => {
+  const idx = await loadIdx(req, req.params.id);
+  const r = idx.review || {};
+  if (r.status !== "requested") throw httpError(400, "There is no open review request for this form.");
+  const team = mongoose.isValidObjectId(r.teamId) ? await Team.findById(r.teamId) : null;
+  const shared = idx.teamShares.some((t) => t.teamId === r.teamId);
+  if (!team || !shared || !canView(accessOf(req, idx)) || !team.members.some((m) => m.userId === req.userId && m.role === "reviewer")) {
+    throw httpError(403, "Only a reviewer in the team that was asked can review this form.");
+  }
+  const decision = req.body?.decision;
+  if (!["approve", "changes"].includes(decision)) throw httpError(400, "Choose approve or request changes.");
+  const note = String(req.body?.note || "").trim().slice(0, 1000);
+  if (decision === "changes" && !note) throw httpError(400, "Say what should change, so the editor knows what to fix.");
+  idx.review.status = decision === "approve" ? "approved" : "changes_requested";
+  idx.review.decidedBy = req.userId;
+  idx.review.decidedAt = new Date();
+  idx.review.note = note;
+  await idx.save();
+  logger.info("form", `Review ${idx.review.status}`, { req, meta: { formId: String(idx._id), teamId: r.teamId } });
+  notifyReviewDecision({ idx, requesterId: r.requestedBy, reviewer: req.user, approved: decision === "approve" });
+  res.json({ review: await reviewInfo(req, idx, accessOf(req, idx)) });
+});
+
+// DELETE /api/sharing/forms/:id/review: withdraw or clear (editors).
+router.delete("/forms/:id/review", async (req, res) => {
+  const idx = await loadIdx(req, req.params.id);
+  if (!canEdit(accessOf(req, idx))) throw httpError(403, "Only people who can edit this form can change its review.");
+  idx.review = clearedReview();
+  await idx.save();
+  res.json({ review: await reviewInfo(req, idx, accessOf(req, idx)) });
+});
+
+// GET /api/sharing/reviews: forms waiting for MY review (titles only).
+router.get("/reviews", async (req, res) => {
+  const myTeams = await Team.find({ members: { $elemMatch: { userId: req.userId, role: "reviewer" } } }).select("name");
+  if (!myTeams.length) return res.json({ isReviewer: false, forms: [] });
+  const names = new Map(myTeams.map((t) => [String(t._id), t.name]));
+  const idxs = (await FormIndex.find({ "review.status": "requested", "review.teamId": { $in: [...names.keys()] } }).sort({ "review.requestedAt": -1 }).limit(100))
+    .filter((i) => i.teamShares.some((t) => t.teamId === i.review.teamId) && accessOf(req, i));
+  const byCompany = new Map();
+  for (const i of idxs) byCompany.set(String(i.companyId), [...(byCompany.get(String(i.companyId)) || []), i._id]);
+  const titles = new Map();
+  for (const [companyId, ids] of byCompany) {
+    try {
+      const t = await tenantForCompanyId(companyId);
+      for (const f of await t.Form.find({ _id: { $in: ids } }).select("title").lean()) titles.set(String(f._id), f.title);
+    } catch { /* unreachable database: skip */ }
+  }
+  const requesters = new Map((await User.find({ _id: { $in: idxs.map((i) => i.review.requestedBy).filter((x) => mongoose.isValidObjectId(x)) } }).select("name email")).map((u) => [String(u._id), u]));
+  res.json({
+    isReviewer: true,
+    forms: idxs.filter((i) => titles.has(String(i._id))).map((i) => ({
+      _id: String(i._id), title: titles.get(String(i._id)), team: names.get(i.review.teamId), requestedAt: i.review.requestedAt,
+      requestedBy: brief(requesters.get(i.review.requestedBy)), requestNote: i.review.requestNote || "",
+    })),
+  });
+});
 
 // GET /api/sharing/forms/:id
 router.get("/forms/:id", async (req, res) => {
@@ -167,6 +264,7 @@ router.delete("/forms/:id/teams/:teamId", async (req, res) => {
   const idx = await loadIdx(req, req.params.id);
   assertManage(req, idx);
   idx.teamShares = idx.teamShares.filter((s) => s.teamId !== req.params.teamId);
+  if (idx.review?.status === "requested" && idx.review.teamId === req.params.teamId) idx.review = clearedReview(); // nobody left to review it
   await idx.save();
   res.json(await overview(req, idx));
 });

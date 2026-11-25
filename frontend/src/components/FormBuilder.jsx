@@ -6,6 +6,7 @@ import SharePeopleModal from "./SharePeopleModal.jsx";
 import SubmissionsView from "./SubmissionsView.jsx";
 import ShareMenu from "./ShareMenu.jsx";
 import DesignPanel from "./DesignPanel.jsx";
+import ReviewBar from "./ReviewBar.jsx";
 import { api } from "../api.js";
 import { setLeaveGuard } from "../lib/navGuard.js";
 
@@ -119,6 +120,34 @@ export default function FormBuilder({ draft, formId, onSaved }) {
     const t = setTimeout(() => ls.set(backupKey, { snap, at: new Date().toISOString() }), 800);
     return () => clearTimeout(t);
   }, [snap, dirty, backupKey, savedForm?.publishedAt]);
+
+  // GUUT AI: tell the assistant what is on screen (so edits build on unsaved changes too), and apply the
+  // changes it proposes when the person clicks Apply. The previous version is kept for one-click Undo.
+  const [aiUndo, setAiUndo] = useState(null);
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("guut:builder-state", { detail: readOnly ? null : { formId: id, title, description, fields } }));
+  }, [id, title, description, fields, readOnly]);
+  useEffect(() => () => window.dispatchEvent(new CustomEvent("guut:builder-state", { detail: null })), []);
+  const liveRef = useRef({ title, description, fields });
+  liveRef.current = { title, description, fields };
+  useEffect(() => {
+    const onApply = (e) => {
+      const d = e.detail || {};
+      if (readOnly || (d.formId || null) !== (id || null) || !Array.isArray(d.fields)) return;
+      setAiUndo({ ...liveRef.current });
+      setTitle(d.title || liveRef.current.title);
+      setDescription(d.description ?? liveRef.current.description);
+      setFields(sortFields(d.fields.map((f, i) => ({ ...f, order: i }))));
+      setTab("build");
+    };
+    window.addEventListener("guut:assistant-apply", onApply);
+    return () => window.removeEventListener("guut:assistant-apply", onApply);
+  }, [id, readOnly]);
+  function undoAi() {
+    if (!aiUndo) return;
+    setTitle(aiUndo.title); setDescription(aiUndo.description); setFields(aiUndo.fields);
+    setAiUndo(null);
+  }
 
   const selected = fields.find((f) => f.id === selectedId) || null;
 
@@ -321,6 +350,16 @@ export default function FormBuilder({ draft, formId, onSaved }) {
           </span>
         </div>
       )}
+      {aiUndo && (
+        <div className="info-banner ai-applied" role="status">
+          <span><strong>GUUT AI updated this form.</strong> Check the questions, then save{savedForm?.publishedAt ? " to update the live form" : ""}.</span>
+          <span className="publish-notice-actions">
+            <button className="small" onClick={undoAi}>Undo</button>
+            <button className="icon-btn" onClick={() => setAiUndo(null)} aria-label="Dismiss">✕</button>
+          </span>
+        </div>
+      )}
+      {savedForm?._id && <ReviewBar key={`review-${shareOpen}`} formId={savedForm._id} dirty={dirty} updatedAt={savedForm.updatedAt} />}
       {readOnly && (
         <div className="ro-banner">View only: you can look at this form, its responses and charts, but not change it. Ask the owner for edit access.</div>
       )}

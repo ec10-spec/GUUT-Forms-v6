@@ -25,7 +25,7 @@ const SUGGESTIONS = {
   new: ["Add 3 questions about customer satisfaction", "Make this form shorter", "Add a follow-up question for low ratings"],
   home: ["Find my most recent draft", "Draft an event RSVP form", "Which of my forms are published?"],
   teams: ["How do team reviewers work?", "How do I share a form with a whole team?"],
-  settings: ["Where do I add my AI key?", "How do response emails work?"],
+  settings: ["How do response emails work?", "How do I see my AI usage?", "How do I connect Google sign-in?"],
   other: ["How do I share a form?", "Draft a customer feedback form", "What can you help me with?"],
 };
 const suggestionsFor = (page) => SUGGESTIONS[page === "edit" ? "edit" : page === "new" ? "new" : page === "home" ? "home" : page === "teams" ? "teams" : page === "settings" ? "settings" : "other"];

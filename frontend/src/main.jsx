@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { api } from "./api.js";
+import { reloadForNewVersion } from "./lib/staleVersion.js";
 import "./styles/app.css";
 
 // Send uncaught browser errors to the backend log (stored in MongoDB). Deduped
@@ -15,5 +16,7 @@ function report(kind, message, stack) {
 }
 window.addEventListener("error", (e) => report("error", e.message, e.error?.stack));
 window.addEventListener("unhandledrejection", (e) => report("unhandledrejection", e.reason?.message || String(e.reason), e.reason?.stack));
+
+window.addEventListener("vite:preloadError", (e) => { if (reloadForNewVersion()) e.preventDefault(); });
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

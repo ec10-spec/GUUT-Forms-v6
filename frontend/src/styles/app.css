@@ -1629,3 +1629,9 @@ details.advanced label + label { margin-top: 10px; }
 @media (min-width: 641px) and (max-width: 1023px) {
   .assistant-panel.sheet { top: 0; bottom: 0; left: auto; right: 0; width: 400px; height: auto; border-radius: 0; border: none; border-left: 1px solid var(--border); box-shadow: -12px 0 32px rgba(10, 15, 30, .18); }
 }
+/* Builder header when the page is narrow: status sits at the start of its row, actions at the end */
+.workspace { container-type: inline-size; }
+@container (max-width: 860px) {
+  .workspace-header .form-status { margin-left: 0; }
+  .workspace-header .workspace-tabs { margin-left: auto; }
+}

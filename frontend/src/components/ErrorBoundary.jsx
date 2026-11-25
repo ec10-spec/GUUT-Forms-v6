@@ -1,5 +1,6 @@
 import React from "react";
 import { api } from "../api.js";
+import { STALE_RE, reloadForNewVersion } from "../lib/staleVersion.js";
 
 /**
  * Catches a crash in one part of the page so the rest of the app keeps working.
@@ -17,6 +18,8 @@ export default class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
+    // A tab left open across a deploy: load the new version rather than show an error.
+    if (STALE_RE.test(String(error?.message || "")) && reloadForNewVersion()) return;
     try {
       api.logClientError({
         message: String(error?.message || error).slice(0, 500),

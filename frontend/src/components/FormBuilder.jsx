@@ -90,6 +90,7 @@ export default function FormBuilder({ draft, formId, onSaved }) {
   const [addOpen, setAddOpen] = useState(false);
   const [narrow, setNarrow] = useState(false); // builder too narrow for two columns: edit questions in place
   const workspaceRef = useRef(null);
+  const pickedRef = useRef(false); // the person chose a question (or added one) themselves
   const creatingRef = useRef(false);
   const [backup, setBackup] = useState(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -177,7 +178,12 @@ export default function FormBuilder({ draft, formId, onSaved }) {
   useEffect(() => {
     const el = workspaceRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(([e]) => setNarrow(e.contentRect.width < 860));
+    const ro = new ResizeObserver(([e]) => {
+      const isNarrow = e.contentRect.width < 860;
+      setNarrow(isNarrow);
+      // Narrow: questions are edited in place, so don't open one until the person picks it.
+      if (isNarrow && !pickedRef.current) setSelectedId(null);
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -205,6 +211,7 @@ export default function FormBuilder({ draft, formId, onSaved }) {
 
   function addField(type) {
     setAddOpen(false);
+    pickedRef.current = true;
     const f = newField(type, fields.length);
     setFields([...fields, f]);
     setSelectedId(f.id);
@@ -503,7 +510,7 @@ export default function FormBuilder({ draft, formId, onSaved }) {
                     onDragStart={() => setDragId(f.id)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={() => handleDropOn(f.id)}
-                    onClick={() => setSelectedId(f.id)}
+                    onClick={() => { pickedRef.current = true; setSelectedId(f.id); }}
                     className={`field-card ${selectedId === f.id ? "selected" : ""}`}
                   >
                     <span className="drag-handle" aria-hidden="true">⠿</span>

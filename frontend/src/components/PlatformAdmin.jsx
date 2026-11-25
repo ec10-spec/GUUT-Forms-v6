@@ -396,7 +396,7 @@ function Logs() {
                     {l.attachment?.name && (
                       attach[l._id]
                         ? <a href={attach[l._id]} download={l.attachment.name}>Download {l.attachment.name}</a>
-                        : <button className="link-btn" onClick={() => showAttachment(l)}>📎 Load {l.attachment.name}</button>
+                        : <button className="link-btn" onClick={() => showAttachment(l)}>Load attachment: {l.attachment.name}</button>
                     )}
                     {(l.stack || l.meta || l.url) && (
                       <details>

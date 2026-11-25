@@ -3,7 +3,7 @@ import { api } from "../api.js";
 
 /**
  * Public repository: a browsable gallery of forms their owners have marked
- * public. No login required — anyone can discover a survey and open it to fill.
+ * public. No login required: anyone can discover a survey and open it to fill.
  * Signed-in visitors can also save a copy of any listed form into their own
  * account as an editable draft ("save this as a template").
  */

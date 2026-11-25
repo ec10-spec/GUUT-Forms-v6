@@ -1622,3 +1622,10 @@ button.small, .btn-link.small { padding: 6px 12px; font-size: 13px; border-radiu
 .explore-preview { list-style: decimal; }
 .landing-cta .btn-link { padding: 13px 22px; font-weight: 700; font-size: 15px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); }
 details.advanced label + label { margin-top: 10px; }
+/* GUUT AI on narrow screens: a sheet over a dimmed page; tap outside to close */
+.assistant-backdrop { position: fixed; inset: 0; z-index: 44; background: rgba(8, 12, 28, .35); }
+@media (min-width: 1024px) { .assistant-backdrop { display: none; } }
+.assistant-panel.sheet { z-index: 46; }
+@media (min-width: 641px) and (max-width: 1023px) {
+  .assistant-panel.sheet { top: 0; bottom: 0; left: auto; right: 0; width: 400px; height: auto; border-radius: 0; border: none; border-left: 1px solid var(--border); box-shadow: -12px 0 32px rgba(10, 15, 30, .18); }
+}

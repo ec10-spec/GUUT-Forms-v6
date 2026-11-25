@@ -45,7 +45,26 @@ const when = (d) => new Date(d).toLocaleString(undefined, { month: "short", day:
 export default function GuutAssistant({ user, route, builder, onNavigate, onOpenDraft }) {
   const [status, setStatus] = useState(null); // { aiReady, saveHistory, canSave }
   // Open by default where it can sit beside the page; on phones it waits behind the launcher.
-  const [open, setOpen] = useState(() => window.innerWidth >= DOCK_MIN && store.get(OPEN_KEY, "1") === "1");
+  // Two separate states: docked beside the page on wide screens (remembered), and a sheet on narrow screens
+  // (never remembered, always starts closed). Resizing a window never turns the docked panel into a sheet.
+  const [wide, setWide] = useState(() => window.innerWidth >= DOCK_MIN);
+  const [dockOpen, setDockOpen] = useState(() => store.get(OPEN_KEY, "1") === "1");
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const open = wide ? dockOpen : sheetOpen;
+  const openRef = useRef(open);
+  openRef.current = open;
+  const setOpen = useCallback((v) => {
+    const next = typeof v === "function" ? v(openRef.current) : v;
+    if (window.innerWidth >= DOCK_MIN) setDockOpen(next); else setSheetOpen(next);
+  }, []);
+  useEffect(() => {
+    const onResize = () => {
+      const w = window.innerWidth >= DOCK_MIN;
+      setWide((was) => { if (was !== w) setSheetOpen(false); return w; });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [cardOpen, setCardOpen] = useState(false); // no key: the "how to switch it on" card, only when asked
   const [failedText, setFailedText] = useState(null); // last message that failed, for Try again
   const [copied, setCopied] = useState(null);
@@ -109,9 +128,18 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) firstRender.current = false;
-    else if (window.innerWidth >= DOCK_MIN) store.set(OPEN_KEY, open ? "1" : "0");
-    document.documentElement.classList.toggle("assistant-docked", !!(open && status?.aiReady));
-  }, [open, status?.aiReady]);
+    else store.set(OPEN_KEY, dockOpen ? "1" : "0");
+  }, [dockOpen]);
+  useEffect(() => {
+    document.documentElement.classList.toggle("assistant-docked", !!(wide && dockOpen && status?.aiReady));
+  }, [wide, dockOpen, status?.aiReady]);
+  // The narrow-screen sheet closes with Escape, like any other sheet.
+  useEffect(() => {
+    if (wide || !sheetOpen) return;
+    const onKey = (e) => { if (e.key === "Escape" && !e.defaultPrevented) setSheetOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [wide, sheetOpen]);
   // Ctrl/Cmd+J opens or closes GUUT AI from anywhere.
   useEffect(() => {
     const onKey = (e) => {
@@ -257,7 +285,9 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
 
   const empty = !messages.length;
   return (
-    <aside className="assistant-panel" aria-label="GUUT AI">
+    <>
+    {!wide && <div className="assistant-backdrop" onClick={() => { setSheetOpen(false); setMenu(false); }} aria-hidden="true" />}
+    <aside className={`assistant-panel ${wide ? "docked" : "sheet"}`} aria-label="GUUT AI" role={wide ? undefined : "dialog"} aria-modal={wide ? undefined : true}>
       <div className="assistant-head">
         <span className="assistant-title"><Logo variant="mark" height={20} /> GUUT AI</span>
         <div className="assistant-head-actions">
@@ -384,5 +414,6 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
         </>
       )}
     </aside>
+    </>
   );
 }

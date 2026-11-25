@@ -125,7 +125,7 @@ export default function FormBuilder({ draft, formId, onSaved }) {
   // changes it proposes when the person clicks Apply. The previous version is kept for one-click Undo.
   const [aiUndo, setAiUndo] = useState(null);
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent("guut:builder-state", { detail: readOnly ? null : { formId: id, title, description, fields } }));
+    window.dispatchEvent(new CustomEvent("guut:builder-state", { detail: { formId: id, title, description, fields, readOnly } }));
   }, [id, title, description, fields, readOnly]);
   useEffect(() => () => window.dispatchEvent(new CustomEvent("guut:builder-state", { detail: null })), []);
   const liveRef = useRef({ title, description, fields });

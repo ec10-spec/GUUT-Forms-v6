@@ -2,10 +2,10 @@ import React, { Suspense, lazy, useEffect, useState } from "react";
 import { api, assetUrl } from "../api.js";
 import Icon from "./Icon.jsx";
 import ImportModal from "./ImportModal.jsx";
+import { ANALYSES, askGuutAi } from "../lib/guutAi.js";
 
-// Charts and the AI assistant load only when someone opens those tabs.
+// Charts load only when someone opens that tab. AI questions go to GUUT AI (the panel beside the page).
 const AnalyticsView = lazy(() => import("./AnalyticsView.jsx"));
-const AiAnalyst = lazy(() => import("./AiAnalyst.jsx"));
 
 const isFile = (v) => v && typeof v === "object" && !Array.isArray(v) && v.fileId;
 /** Plain text of an answer, as shown in the table and searched by filters. */
@@ -27,7 +27,7 @@ function Cell({ field, value, expanded }) {
 }
 
 export default function SubmissionsView({ form }) {
-  const [view, setView] = useState("table"); // "table" | "charts" | "ai"
+  const [view, setView] = useState("table"); // "table" | "charts"
   const [seen, setSeen] = useState({ table: true });
   const [submissions, setSubmissions] = useState([]);
   const [q, setQ] = useState("");
@@ -90,12 +90,16 @@ export default function SubmissionsView({ form }) {
       <div className="resp-tabs" role="tablist">
         <button role="tab" aria-selected={view === "table"} className={view === "table" ? "active" : ""} onClick={() => go("table")}>Responses</button>
         <button role="tab" aria-selected={view === "charts"} className={view === "charts" ? "active" : ""} onClick={() => go("charts")}>Charts and analysis</button>
-        <button role="tab" aria-selected={view === "ai"} className={view === "ai" ? "active" : ""} onClick={() => go("ai")}>AI assistant</button>
       </div>
 
+      {view === "charts" && (
+        <div className="ask-ai-bar">
+          <span className="ask-ai-label"><Icon name="spark" /> Ask GUUT AI</span>
+          {ANALYSES.map(([label, prompt]) => <button key={label} className="template-chip" onClick={() => askGuutAi(prompt, { send: true })}>{label}</button>)}
+        </div>
+      )}
       {view === "charts" && <Suspense fallback={<p className="empty-hint">Loading charts...</p>}><AnalyticsView form={form} /></Suspense>}
       {/* The assistant stays mounted after its first open, so a conversation in progress isn't lost. */}
-      {seen.ai && <div hidden={view !== "ai"}><Suspense fallback={<p className="empty-hint">Loading...</p>}><AiAnalyst form={form} /></Suspense></div>}
 
       {view === "table" && (
         <>

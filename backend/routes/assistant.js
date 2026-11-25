@@ -21,6 +21,14 @@ import { logger } from "../utils/logger.js";
 const router = Router();
 router.use(requireAuth);
 
+// Answer length (one setting for the whole assistant). Edits and drafts still get room for their JSON.
+const LENGTHS = {
+  brief: { maxTokens: 2000, instruction: "Answer length: BRIEF. The reply text is at most 5 short lines or bullets (about 120 words)." },
+  standard: { maxTokens: 3000, instruction: "Answer length: STANDARD. The reply text is about 150 to 300 words when the question needs it, shorter for simple questions." },
+  detailed: { maxTokens: 4000, instruction: "Answer length: DETAILED. For analysis, a full write-up of up to about 700 words: findings, evidence, caveats and prioritised actions." },
+};
+const lengthOf = (v) => (LENGTHS[v] ? v : "standard");
+
 const chatLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: "Too many AI requests. Please wait a minute." } });
 const isId = (v) => /^[a-f\d]{24}$/i.test(String(v || ""));
 
@@ -50,7 +58,7 @@ You can:
 2. Find the person's forms from the FORMS list (search by title, status or date) and offer to open them.
 3. Draft a new form when asked.
 4. Edit the form that is currently open, when CURRENT FORM is given and editing is allowed.
-5. Explain the responses of the open form, from RESPONSES (aggregates). Never invent numbers; mention the sample size; with under about 20 responses call patterns tentative.
+5. Explain the responses of the open form, from RESPONSES (aggregates, plus sampleOfRecentResponses when the person shared them). Never invent numbers; mention the sample size; with under about 20 responses call patterns tentative. Lead with the finding, then the evidence with the actual numbers, then a recommended action; add business context (what a pattern could mean, what to do next, how to improve the questions) when useful. If free-text answers were not shared, say the person can switch on "Read sample answers" for themes.
 
 Reply with ONLY a JSON object, no markdown fences:
 {
@@ -120,7 +128,8 @@ async function formContext(req, context) {
     questions: simpleFields(live.fields),
   };
   const rows = await tenant.Submission.find({ formId: idx._id }).sort({ createdAt: 1 }).limit(5000).lean();
-  const responses = rows.length ? buildAiContext(form, buildSummary(form, rows, { tz: req.body?.tz }), rows, false) : { total: 0 };
+  // Aggregates only, unless the person chose to share a sample of answers (names, emails and files never).
+  const responses = rows.length ? buildAiContext(form, buildSummary(form, rows, { tz: req.body?.tz }), rows, req.body?.includeRaw === true) : { total: 0 };
   return { ctx, responses, form, editable };
 }
 
@@ -187,20 +196,28 @@ async function myTenant(req) {
   const company = await Company.findById(req.user.companyId);
   return company ? getTenant(company) : null;
 }
+const usageOf = (b) => ({ remaining: b.remaining, limit: b.limit, source: b.source, creditLeftUsd: b.credit?.remainingUsd ?? null });
 const saving = (req) => req.user.settings?.assistantSaveHistory !== false;
 const chatOut = (c) => ({ _id: c._id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, messages: c.messages });
 
 // GET /api/assistant/status: is AI ready, and is history being saved.
 router.get("/status", async (req, res) => {
   const budget = await getBudget(req.user);
-  res.json({ aiReady: budget.aiReady, source: budget.source, saveHistory: saving(req), canSave: !!req.user.companyId, provider: req.user.ai?.provider || "anthropic" });
+  res.json({ aiReady: budget.aiReady, source: budget.source, saveHistory: saving(req), canSave: !!req.user.companyId, provider: req.user.ai?.provider || "anthropic", budget: usageOf(budget) });
 });
 
-// GET /api/assistant/chats: my saved conversations, newest first.
+// GET /api/assistant/chats: my saved conversations, newest first. Chats from the old per-form "AI assistant"
+// tab (AnalysisChat, in my own workspace) are listed too, titled with their form; replying moves one over.
 router.get("/chats", async (req, res) => {
   const t = await myTenant(req);
   if (!t) return res.json([]);
-  res.json(await t.AssistantChat.find({ userId: req.userId }).sort({ updatedAt: -1 }).limit(50).select("title createdAt updatedAt").lean());
+  const [mine, legacy] = await Promise.all([
+    t.AssistantChat.find({ userId: req.userId }).sort({ updatedAt: -1 }).limit(50).select("title createdAt updatedAt").lean(),
+    t.AnalysisChat.find({ userId: req.userId }).sort({ updatedAt: -1 }).limit(50).select("title formId createdAt updatedAt").lean(),
+  ]);
+  const titles = new Map((legacy.length ? await t.Form.find({ _id: { $in: [...new Set(legacy.map((c) => String(c.formId)))] } }).select("title").lean() : []).map((f) => [String(f._id), f.title]));
+  const old = legacy.filter((c) => titles.has(String(c.formId))).map((c) => ({ _id: c._id, title: `${titles.get(String(c.formId))}: ${c.title}`, createdAt: c.createdAt, updatedAt: c.updatedAt, formId: String(c.formId), kind: "analysis" }));
+  res.json([...mine, ...old].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 60));
 });
 
 async function findChat(t, req, id) {
@@ -208,9 +225,13 @@ async function findChat(t, req, id) {
   if (!chat) throw httpError(404, "That chat no longer exists.", { code: "CHAT_NOT_FOUND" });
   return chat;
 }
+const findLegacy = (t, req, id) => (t && isId(id) ? t.AnalysisChat.findOne({ _id: id, userId: req.userId }) : null);
 
 router.get("/chats/:id", async (req, res) => {
-  res.json(chatOut(await findChat(await myTenant(req), req, req.params.id)));
+  const t = await myTenant(req);
+  const legacy = t && isId(req.params.id) && !(await t.AssistantChat.exists({ _id: req.params.id, userId: req.userId })) ? await findLegacy(t, req, req.params.id) : null;
+  if (legacy) return res.json({ _id: legacy._id, title: legacy.title, kind: "analysis", formId: String(legacy.formId), messages: legacy.messages.map((m) => ({ role: m.role, content: m.content, at: m.at })) });
+  res.json(chatOut(await findChat(t, req, req.params.id)));
 });
 
 router.patch("/chats/:id", async (req, res) => {
@@ -223,7 +244,10 @@ router.patch("/chats/:id", async (req, res) => {
 });
 
 router.delete("/chats/:id", async (req, res) => {
-  const chat = await findChat(await myTenant(req), req, req.params.id);
+  const t = await myTenant(req);
+  const legacy = await findLegacy(t, req, req.params.id);
+  if (legacy) { await legacy.deleteOne(); return res.status(204).end(); }
+  const chat = await findChat(t, req, req.params.id);
   await chat.deleteOne();
   res.status(204).end();
 });
@@ -232,6 +256,7 @@ router.delete("/chats/:id", async (req, res) => {
 router.delete("/chats", async (req, res) => {
   const t = await myTenant(req);
   const r = t ? await t.AssistantChat.deleteMany({ userId: req.userId }) : { deletedCount: 0 };
+  if (t) await t.AnalysisChat.deleteMany({ userId: req.userId });
   logger.info("ai", "Assistant history cleared", { req, meta: { deleted: r.deletedCount } });
   res.json({ deleted: r.deletedCount || 0 });
 });
@@ -247,7 +272,7 @@ router.put("/settings", async (req, res) => {
 // POST /api/assistant/chat { message, chatId?, history?, context?: { page, formId?, draft? } }
 //   With history saved: send chatId to continue a conversation (none starts a new one).
 //   With history off: send the thread so far as history ([{ role, content }]); nothing is stored.
-router.post("/chat", chatLimiter, (req, _res, next) => { req.body = req.body || {}; req.body.maxTokens = 3000; next(); }, analysisTokenLimiter, async (req, res) => {
+router.post("/chat", chatLimiter, (req, _res, next) => { req.body = req.body || {}; req.body.maxTokens = LENGTHS[lengthOf(req.body.length)].maxTokens; next(); }, analysisTokenLimiter, async (req, res) => {
   const text = String(req.body.message || "").trim().slice(0, 4000);
   if (!text) throw httpError(400, "Write a message first.");
   const cfg = await resolveAi(req.user);
@@ -255,7 +280,16 @@ router.post("/chat", chatLimiter, (req, _res, next) => { req.body = req.body || 
 
   const context = req.body.context && typeof req.body.context === "object" ? req.body.context : {};
   const tenant = saving(req) ? await myTenant(req) : null;
-  let chat = tenant && req.body.chatId ? await findChat(tenant, req, req.body.chatId) : null;
+  let chat = null;
+  if (tenant && req.body.chatId) {
+    const legacy = (await tenant.AssistantChat.exists({ _id: req.body.chatId, userId: req.userId })) ? null : await findLegacy(tenant, req, req.body.chatId);
+    if (legacy) {
+      // An old form analysis chat: carry it into GUUT AI and continue there.
+      chat = new tenant.AssistantChat({ userId: req.userId, title: legacy.title, messages: legacy.messages.map((m) => ({ role: m.role, content: m.content, at: m.at, formId: String(legacy.formId) })), inputTokens: legacy.inputTokens || 0, outputTokens: legacy.outputTokens || 0 });
+      await chat.save();
+      await legacy.deleteOne();
+    } else chat = await findChat(tenant, req, req.body.chatId);
+  }
   const prior = chat ? chat.messages.map((m) => ({ role: m.role, content: m.content })) : Array.isArray(req.body.history) ? req.body.history : [];
 
   const [forms, fc] = await Promise.all([catalog(req), formContext(req, context)]);
@@ -269,7 +303,7 @@ router.post("/chat", chatLimiter, (req, _res, next) => { req.body = req.body || 
     ...(fc.ctx ? { CURRENT_FORM: fc.ctx } : {}),
     ...(fc.responses ? { RESPONSES: fc.responses } : {}),
   };
-  const system = `${SYSTEM}\n\nGUIDE:\n${GUIDE}\n\nDATA (JSON):\n${JSON.stringify(data)}`;
+  const system = `${SYSTEM}\n${LENGTHS[lengthOf(req.body.length)].instruction}\n\nGUIDE:\n${GUIDE}\n\nDATA (JSON):\n${JSON.stringify(data)}`;
   const messages = normalizeMessages([...prior.slice(-12), { role: "user", content: text }]);
 
   const started = Date.now();
@@ -311,7 +345,7 @@ router.post("/chat", chatLimiter, (req, _res, next) => { req.body = req.body || 
     reply, actions, truncated: !!result.truncated,
     chatId: saved?._id || null, chat: saved,
     usage: { input: result.inputTokens, output: result.outputTokens },
-    tokenBudget: await getBudget(req.user),
+    budget: usageOf(await getBudget(req.user)),
   });
 });
 

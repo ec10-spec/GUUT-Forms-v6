@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import Icon from "./Icon.jsx";
 import Logo from "./Logo.jsx";
 import RichText from "./RichText.jsx";
+import { ANALYSES } from "../lib/guutAi.js";
 
 // GUUT AI: one assistant beside every signed-in page. Docked on the right and open by default once an AI
 // key is saved (a close button tucks it away; the launcher brings it back). Without a key it shows a small
@@ -19,13 +20,16 @@ const store = {
 };
 const OPEN_KEY = "guut_assistant_open";
 const LAST_KEY = "guut_assistant_chat";
+const LENGTH_KEY = "guut_assistant_length";
+const LENGTHS = [["brief", "Brief"], ["standard", "Standard"], ["detailed", "Detailed"]];
+
 
 const SUGGESTIONS = {
-  edit: ["Suggest improvements to this form", "Add a question asking how they heard about us", "Summarise the responses so far", "Make the questions shorter and clearer"],
+  edit: ["Summarise the responses so far", "Suggest improvements to this form", "Add a question asking how they heard about us", "Make the questions shorter and clearer"],
   new: ["Add 3 questions about customer satisfaction", "Make this form shorter", "Add a follow-up question for low ratings"],
   home: ["Find my most recent draft", "Draft an event RSVP form", "Which of my forms are published?"],
   teams: ["How do team reviewers work?", "How do I share a form with a whole team?"],
-  settings: ["How do response emails work?", "How do I see my AI usage?", "How do I connect Google sign-in?"],
+  settings: ["How do response emails work?", "How do I connect Google sign-in?", "How do team reviewers work?"],
   other: ["How do I share a form?", "Draft a customer feedback form", "What can you help me with?"],
 };
 const suggestionsFor = (page) => SUGGESTIONS[page === "edit" ? "edit" : page === "new" ? "new" : page === "home" ? "home" : page === "teams" ? "teams" : page === "settings" ? "settings" : "other"];
@@ -49,13 +53,36 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
   const [error, setError] = useState(null);
   const [applied, setApplied] = useState({}); // message index -> "applied"
   const [menu, setMenu] = useState(false);
+  const [length, setLength] = useState(() => store.get(LENGTH_KEY, "standard"));
+  const [includeRaw, setIncludeRaw] = useState(false); // share a sample of answers for the open form
+  const [budget, setBudget] = useState(null);
   const endRef = useRef(null);
   const inputRef = useRef(null);
+  const menuRef = useRef(null);
+  const sendRef = useRef(null);
+
+  // The options menu closes on any click outside it, and on Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(false); };
+    const onKey = (e) => { if (e.key === "Escape") setMenu(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [menu]);
+  useEffect(() => { store.set(LENGTH_KEY, length); }, [length]);
 
   const page = route.name;
   const formId = page === "edit" ? route.id : null;
+  useEffect(() => { setIncludeRaw(false); }, [formId]); // sharing answers is a choice per form, per visit
+  const [formTitle, setFormTitle] = useState(null);
+  useEffect(() => {
+    const on = (e) => setFormTitle(e.detail?.formId && e.detail.formId === formId ? e.detail.title : null);
+    window.addEventListener("guut:builder-state", on);
+    return () => window.removeEventListener("guut:builder-state", on);
+  }, [formId]);
 
-  const loadStatus = useCallback(() => api.assistantStatus().then(setStatus).catch(() => setStatus({ aiReady: false, saveHistory: false, canSave: false, failed: true })), []);
+  const loadStatus = useCallback(() => api.assistantStatus().then((st) => { setStatus(st); setBudget(st.budget || null); }).catch(() => setStatus({ aiReady: false, saveHistory: false, canSave: false, failed: true })), []);
   useEffect(() => { loadStatus(); }, [loadStatus, user?._id, user?.hasAiApiKey, user?.ai?.provider]);
   // Settings saves a key: check again when the person comes back to the tab.
   useEffect(() => { const f = () => document.visibilityState === "visible" && loadStatus(); document.addEventListener("visibilitychange", f); return () => document.removeEventListener("visibilitychange", f); }, [loadStatus]);
@@ -80,7 +107,13 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [messages, busy]);
   // Other parts of the app can open the assistant with a question ("Ask GUUT AI").
   useEffect(() => {
-    const on = (e) => { setOpen(true); setView("chat"); if (e.detail?.prompt) setInput(e.detail.prompt); setTimeout(() => inputRef.current?.focus(), 50); };
+    const on = (e) => {
+      const d = e.detail || {};
+      setOpen(true); setView("chat"); setMenu(false);
+      if (typeof d.includeRaw === "boolean") setIncludeRaw(d.includeRaw);
+      if (d.prompt && d.send) setTimeout(() => sendRef.current?.(d.prompt, { includeRaw: d.includeRaw }), 0);
+      else { if (d.prompt) setInput(d.prompt); setTimeout(() => inputRef.current?.focus(), 50); }
+    };
     window.addEventListener("guut:assistant-open", on);
     return () => window.removeEventListener("guut:assistant-open", on);
   }, []);
@@ -98,19 +131,21 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
     const ctx = { page };
     if (formId) ctx.formId = formId;
     const b = builder?.current;
-    if (b && (page === "new" || (formId && b.formId === formId))) ctx.draft = { title: b.title, description: b.description, fields: b.fields };
+    if (b && !b.readOnly && (page === "new" || (formId && b.formId === formId))) ctx.draft = { title: b.title, description: b.description, fields: b.fields };
     return ctx;
   }
 
-  async function send(text) {
+  async function send(text, opts = {}) {
     const content = String(text ?? input).trim();
-    if (!content || busy) return;
+    if (!content || busy || !status?.aiReady) return;
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((m) => [...m, { role: "user", content }]);
     setInput(""); setBusy(true); setError(null);
     try {
-      const res = await api.assistantChat({ message: content, chatId: saving ? chatId : null, history: saving ? undefined : history, context: contextNow() });
-      setMessages((m) => [...m, { role: "assistant", content: res.reply, actions: res.actions }]);
+      const raw = typeof opts.includeRaw === "boolean" ? opts.includeRaw : includeRaw;
+      const res = await api.assistantChat({ message: content, chatId: saving ? chatId : null, history: saving ? undefined : history, context: contextNow(), length, includeRaw: !!(formId && raw) });
+      setMessages((m) => [...m, { role: "assistant", content: res.reply, actions: res.actions, truncated: res.truncated }]);
+      if (res.budget) setBudget(res.budget);
       if (res.chatId) {
         if (!chatId) refreshChats();
         setChatId(res.chatId); store.set(LAST_KEY, res.chatId);
@@ -123,6 +158,8 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
       if (err.code === "CHAT_NOT_FOUND") { setChatId(null); store.set(LAST_KEY, ""); refreshChats(); }
     } finally { setBusy(false); }
   }
+
+  sendRef.current = send;
 
   function runAction(a, i, k) {
     if (a.type === "open_form") onNavigate(`/edit/${a.formId}`);
@@ -184,7 +221,7 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
         <div className="assistant-head-actions">
           <button className="icon-btn" title="New chat" aria-label="New chat" onClick={() => openChat(null)}><Icon name="newChat" /></button>
           {saving && <button className={`icon-btn ${view === "history" ? "on" : ""}`} title="Chat history" aria-label="Chat history" onClick={() => { setView(view === "history" ? "chat" : "history"); refreshChats(); }}><Icon name="history" /></button>}
-          <span className="assistant-menu-wrap">
+          <span className="assistant-menu-wrap" ref={menuRef}>
             <button className="icon-btn" title="Options" aria-label="Options" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><Icon name="settings" /></button>
             {menu && (
               <div className="assistant-menu" role="menu">
@@ -192,6 +229,12 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
                   <input type="checkbox" checked={!!status.saveHistory} disabled={!status.canSave} onChange={(e) => toggleHistory(e.target.checked)} />
                   <span><strong>Save chat history</strong><small>{status.canSave ? "Keep conversations so you can reopen them. Off: nothing is stored." : "Available once your account is approved."}</small></span>
                 </label>
+                <div className="assistant-menu-row column">
+                  <strong>Answer length</strong>
+                  <div className="seg-row" role="radiogroup" aria-label="Answer length">
+                    {LENGTHS.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={length === id} className={`seg ${length === id ? "active" : ""}`} onClick={() => setLength(id)}>{label}</button>)}
+                  </div>
+                </div>
                 {saving && <button className="assistant-menu-item danger-text" onClick={clearAll}>Delete all chats</button>}
                 <button className="assistant-menu-item" onClick={() => { setMenu(false); onNavigate("/settings/ai"); }}>AI key and model</button>
                 <button className="assistant-menu-item" onClick={() => { setMenu(false); window.dispatchEvent(new Event("guut:report-open")); }}>Report a problem</button>
@@ -206,13 +249,21 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
         <div className="assistant-history">
           {!chats.length ? <p className="empty-hint">No saved chats yet.</p> : chats.map((c) => (
             <div key={c._id} className={`assistant-history-row ${c._id === chatId ? "current" : ""}`}>
-              <button className="assistant-history-open" onClick={() => openChat(c._id)}><strong>{c.title || "Chat"}</strong><span>{when(c.updatedAt)}</span></button>
+              <button className="assistant-history-open" onClick={() => openChat(c._id)}><strong>{c.title || "Chat"}</strong><span>{c.kind === "analysis" ? "Form analysis, " : ""}{when(c.updatedAt)}</span></button>
               <button className="icon-btn" aria-label="Delete chat" title="Delete chat" onClick={() => deleteChat(c._id)}><Icon name="trash" size={16} /></button>
             </div>
           ))}
         </div>
       ) : (
         <>
+          {formId && (
+            <div className="assistant-context">
+              <span title="GUUT AI can see this form's questions and response statistics">Looking at <strong>{formTitle || (builder?.current?.formId === formId && builder.current.title) || "this form"}</strong></span>
+              <label title="Lets GUUT AI read up to 150 recent answers for themes. Names, emails and files are never sent.">
+                <input type="checkbox" checked={includeRaw} onChange={(e) => setIncludeRaw(e.target.checked)} /> Read sample answers
+              </label>
+            </div>
+          )}
           <div className="assistant-body">
             {empty && (
               <div className="assistant-welcome">
@@ -224,6 +275,7 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
             {messages.map((m, i) => (
               <div key={i} className={`assistant-msg ${m.role}`}>
                 {m.role === "assistant" ? <RichText text={m.content} /> : <p>{m.content}</p>}
+                {m.truncated && <p className="assistant-cut">This answer was cut short. Choose a longer answer length in the options and ask again.</p>}
                 {m.role === "assistant" && !!m.actions?.length && (
                   <div className="assistant-actions">
                     {m.actions.map((a, k) => {
@@ -257,7 +309,10 @@ export default function GuutAssistant({ user, route, builder, onNavigate, onOpen
             />
             <button className="primary icon-send" type="submit" disabled={busy || !input.trim()} aria-label="Send"><Icon name="send" /></button>
           </form>
-          <p className="assistant-foot">{saving ? "Chats are saved to your history." : "History off: nothing is saved."} Uses your own AI key.</p>
+          <p className="assistant-foot">
+            {saving ? "Saved to your history." : "History off: nothing is saved."}{" "}
+            {budget ? (budget.source === "platform_credit" && budget.creditLeftUsd != null ? `Free AI credit: $${budget.creditLeftUsd.toFixed(2)} left. ` : "") + `${budget.remaining.toLocaleString()} tokens left today.` : "Uses your own AI key."}
+          </p>
         </>
       )}
     </aside>

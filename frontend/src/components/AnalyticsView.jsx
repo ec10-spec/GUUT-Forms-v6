@@ -151,7 +151,7 @@ export default function AnalyticsView({ form }) {
       <div className="field-chart-grid">
         {data.fields.map((f) => <FieldCard key={f.id} f={f} />)}
       </div>
-      <p className="settings-hint small">Want an interpretation? Open the AI assistant tab to get insights and ask questions about these numbers.</p>
+      <p className="settings-hint small">Want an interpretation? Use Ask GUUT AI above, or ask anything in the GUUT AI panel.</p>
     </div>
   );
 }

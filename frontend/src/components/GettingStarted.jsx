@@ -17,7 +17,7 @@ export default function GettingStarted({ onTemplates, onDescribe, onBlank }) {
       <ol className="guide-steps">
         <li><span className="guide-n">1</span><div><strong>Start</strong><p>Pick a template, or describe the form above and let AI draft it.</p><div className="guide-actions"><button className="primary small" onClick={onTemplates}>Browse templates</button><button className="secondary small" onClick={onDescribe}>Describe it</button><button className="link-btn" onClick={onBlank}>Blank form</button></div></div></li>
         <li><span className="guide-n">2</span><div><strong>Adjust and publish</strong><p>Edit the questions, pick colours under Design, then press Publish form.</p></div></li>
-        <li><span className="guide-n">3</span><div><strong>Share the link</strong><p>Open Share, copy the link, and watch responses arrive under Responses. Charts and the AI assistant are in the same tab.</p></div></li>
+        <li><span className="guide-n">3</span><div><strong>Share the link</strong><p>Open Share, copy the link, and watch responses arrive under Responses. Charts are in the same tab, and GUUT AI can explain them.</p></div></li>
       </ol>
     </section>
   );
